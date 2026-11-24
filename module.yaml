@@ -2,7 +2,7 @@ name: otel-exporter
 kind: sink
 # release-please bumps the version between these markers.
 # x-release-please-start-version
-version: 0.1.0
+version: 0.1.2
 # x-release-please-end
 license: MIT
 title: OpenTelemetry exporter
