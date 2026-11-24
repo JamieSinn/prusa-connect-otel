@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/JamieSinn/prusa-connect-otel/compare/v0.1.0...v0.1.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* module id ([02bbe99](https://github.com/JamieSinn/prusa-connect-otel/commit/02bbe99d5c2b88ed2fea9e270ef5a617543bbb4d))
+
 ## 0.1.0 (2026-11-24)
 
 
