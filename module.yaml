@@ -1,5 +1,5 @@
-# Prusa Connect module manifest. The namespace is derived by the host from
-# the install path: ca.jamiesinn.prusa-connect-otel.
+# Prusa Connect module manifest. The extension id, ca.jamiesinn.connect-otel,
+# comes from the module path the workflows publish under (connect-otel.jamiesinn.ca).
 
 name: otel-exporter
 kind: sink
@@ -27,15 +27,34 @@ permissions:
   - observe # read printer telemetry, presence and finished prints
 
 # The manifest has to list ports, so these are the common OTLP ones: HTTPS,
-# OTLP gRPC, OTLP HTTP and Dynatrace ActiveGate.
+# OTLP gRPC and OTLP HTTP.
 egress:
   - option: otlp_endpoint
-    ports: [443, 4317, 4318, 9999]
+    ports: [443, 4317, 4318]
     why: Sends metrics and print spans to the configured OTLP collector.
     sends: "Telemetry values with each printer's id, name, vendor and model, and one span per finished print: file name, path, outcome, progress, print time and filament used."
 
 needs:
   memory_mib: 64
+
+# Each entry under contributes has a matching host.register call in
+# ui/src/index.ts.
+ui:
+  entry: ui/index.js
+  library: ">=0.1.0 <1.0.0"
+  contributes:
+    settings:
+      - id: status
+        title: Export status
+    device_section:
+      - id: export
+        title: OpenTelemetry
+    cards:
+      - id: export-health
+        title: OpenTelemetry
+        description: Export health for metrics and print spans.
+        size: {w: 4, h: 3}
+        least: {w: 3, h: 2}
 
 options:
   - key: otlp_endpoint
@@ -48,7 +67,7 @@ options:
     summary: "http/protobuf or grpc. gRPC ignores the URL path."
   - key: otlp_headers
     type: secret
-    summary: "Extra request headers as comma-separated key=value pairs, e.g. Authorization=Api-Token dt0c01.XXXX."
+    summary: "Extra request headers as comma-separated key=value pairs, e.g. Authorization=Bearer <token>."
   - key: otlp_insecure
     type: bool
     default: "false"

@@ -1,3 +1,7 @@
-# go build output
+# Build output
 /prusa-connect-otel
+/ui/node_modules/
+/ui/dist/
+/client/node_modules/
+/client/dist/
 /.idea/

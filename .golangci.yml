@@ -7,7 +7,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - prusa-connect-otel.jamiesinn.ca
+        - github.com/jamiesinn/prusa-connect-otel
     golines:
       max-len: 120
 

@@ -1,0 +1,46 @@
+{
+  "_meta.language": "English",
+  "_meta.note": "Copy to <tag>.json to translate. Missing keys fall back to English.",
+
+  "otel-exporter.health.unconfigured": "Not configured",
+  "otel-exporter.health.waiting": "Waiting",
+  "otel-exporter.health.healthy": "OK",
+  "otel-exporter.health.failing": "Failing",
+  "otel-exporter.health.notRunning": "Stopped",
+
+  "otel-exporter.status.title": "Export status",
+  "otel-exporter.status.description": "Metrics and print spans sent to your OTLP collector.",
+  "otel-exporter.status.reading": "Loading",
+  "otel-exporter.status.notRunning": "The exporter is stopped. Check otlp_endpoint on the Settings tab.",
+  "otel-exporter.status.unconfigured": "Set otlp_endpoint on the Settings tab.",
+  "otel-exporter.status.endpoint": "Endpoint",
+  "otel-exporter.status.protocol": "Protocol",
+  "otel-exporter.status.stream": "Event stream",
+  "otel-exporter.status.metrics": "Metrics",
+  "otel-exporter.status.traces": "Spans",
+  "otel-exporter.status.printers": "Printers",
+  "otel-exporter.status.values": "Values",
+  "otel-exporter.status.metricNames": "Metric names",
+  "otel-exporter.status.dropped": "{count, plural, one {# value} other {# values}} dropped (256 metric name limit reached)",
+
+  "otel-exporter.outcome.none": "Not yet",
+  "otel-exporter.outcome.ok": "OK at {at}",
+  "otel-exporter.outcome.failing": "Failing since {since}",
+
+  "otel-exporter.export.button": "Export now",
+  "otel-exporter.export.sending": "Exporting",
+  "otel-exporter.export.sent": "Export succeeded",
+  "otel-exporter.export.failed": "Export failed",
+
+  "otel-exporter.device.notRunning": "Exporter stopped",
+  "otel-exporter.device.unconfigured": "Exporter not configured",
+  "otel-exporter.device.unknown": "Not exported",
+  "otel-exporter.device.paused": "Paused",
+  "otel-exporter.device.pausedDetail": "Printer offline",
+  "otel-exporter.device.exporting": "Exporting",
+  "otel-exporter.device.values": "{count, plural, one {# value} other {# values}}",
+
+  "otel-exporter.card.title": "OpenTelemetry",
+  "otel-exporter.card.lastExport": "Last export {at}",
+  "otel-exporter.card.printers": "{count, plural, one {# printer} other {# printers}}"
+}

@@ -1,8 +1,8 @@
 // Package otlpexport builds the OTLP metric and trace providers.
 //
-// It handles endpoints with a root path (such as Dynatrace's
-// /e/<env>/api/v2/otlp), picks TLS from the URL scheme, parses headers in the
-// OTEL_EXPORTER_OTLP_HEADERS format, and can report the result of every export.
+// It handles endpoints with a path prefix, picks TLS from the URL scheme, parses
+// headers in the OTEL_EXPORTER_OTLP_HEADERS format, and can report the result
+// of every export.
 package otlpexport
 
 import (

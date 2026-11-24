@@ -78,6 +78,102 @@
           }
         }
       }
+    },
+    "/devices/{id}": {
+      "get": {
+        "operationId": "read-device-export",
+        "summary": "Printer export state",
+        "description": "Whether the printer is tracked and connected, and how many values it has.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The printer id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Printer export state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configured": {
+                      "type": "boolean",
+                      "description": "Whether the exporter is configured."
+                    },
+                    "exported": {
+                      "type": "boolean",
+                      "description": "Whether the printer is tracked."
+                    },
+                    "connected": {
+                      "type": "boolean",
+                      "description": "Whether the printer is connected."
+                    },
+                    "values": {
+                      "type": "integer",
+                      "description": "Gauge values held for the printer."
+                    }
+                  },
+                  "required": [
+                    "configured",
+                    "exported",
+                    "connected",
+                    "values"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/export": {
+      "post": {
+        "operationId": "send-export",
+        "summary": "Export now",
+        "description": "Exports pending metrics and spans now and returns the result. The result also shows in GET /status.",
+        "responses": {
+          "200": {
+            "description": "Export result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the export succeeded."
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "The export error. Absent when ok."
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The exporter is not configured.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

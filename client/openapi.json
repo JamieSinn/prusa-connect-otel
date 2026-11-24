@@ -1,0 +1,210 @@
+{
+  "components": {
+    "schemas": {
+      "Outcome": {
+        "type": "object",
+        "description": "Latest result of a retried operation.",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether the latest attempt succeeded."
+          },
+          "last_success": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Time of the last success."
+          },
+          "failing_since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the current failure. Absent when ok."
+          },
+          "error": {
+            "type": "string",
+            "description": "Latest error. Absent when ok."
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "otel-exporter",
+    "version": "0.1.0",
+    "description": "Routes served by otel-exporter, relative to the module mount."
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/modules/ca.jamiesinn.connect-otel/devices/{id}": {
+      "get": {
+        "operationId": "read-device-export",
+        "summary": "Printer export state",
+        "description": "Whether the printer is tracked and connected, and how many values it has.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The printer id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Printer export state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configured": {
+                      "type": "boolean",
+                      "description": "Whether the exporter is configured."
+                    },
+                    "exported": {
+                      "type": "boolean",
+                      "description": "Whether the printer is tracked."
+                    },
+                    "connected": {
+                      "type": "boolean",
+                      "description": "Whether the printer is connected."
+                    },
+                    "values": {
+                      "type": "integer",
+                      "description": "Gauge values held for the printer."
+                    }
+                  },
+                  "required": [
+                    "configured",
+                    "exported",
+                    "connected",
+                    "values"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/modules/ca.jamiesinn.connect-otel/export": {
+      "post": {
+        "operationId": "send-export",
+        "summary": "Export now",
+        "description": "Exports pending metrics and spans now and returns the result. The result also shows in GET /status.",
+        "responses": {
+          "200": {
+            "description": "Export result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "Whether the export succeeded."
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "The export error. Absent when ok."
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The exporter is not configured.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/modules/ca.jamiesinn.connect-otel/status": {
+      "get": {
+        "operationId": "read-export-status",
+        "summary": "Export status",
+        "description": "Whether the module is reading the event stream and whether the latest metric and trace exports succeeded. A failure is reported until the next success.",
+        "responses": {
+          "200": {
+            "description": "Export status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configured": {
+                      "type": "boolean",
+                      "description": "Whether settings were received and the exporters are running."
+                    },
+                    "endpoint": {
+                      "type": "string",
+                      "description": "Collector endpoint, with any password masked."
+                    },
+                    "protocol": {
+                      "type": "string",
+                      "description": "http/protobuf or grpc."
+                    },
+                    "stream": {
+                      "$ref": "#/components/schemas/Outcome"
+                    },
+                    "last_window": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When the last event window was received."
+                    },
+                    "exports": {
+                      "type": "object",
+                      "description": "Latest outcome per signal (metrics, traces). A signal appears after its first export.",
+                      "additionalProperties": {
+                        "$ref": "#/components/schemas/Outcome"
+                      }
+                    },
+                    "devices": {
+                      "type": "integer",
+                      "description": "Number of printers tracked."
+                    },
+                    "values": {
+                      "type": "integer",
+                      "description": "Number of gauge values held (one per printer and state path)."
+                    },
+                    "metrics": {
+                      "type": "integer",
+                      "description": "Number of gauge metric names created."
+                    },
+                    "dropped_values": {
+                      "type": "integer",
+                      "description": "Values dropped because the limit of 256 metric names was reached."
+                    }
+                  },
+                  "required": [
+                    "configured",
+                    "stream",
+                    "exports",
+                    "devices",
+                    "values",
+                    "metrics",
+                    "dropped_values"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

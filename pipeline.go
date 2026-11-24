@@ -15,7 +15,7 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/event"
 	"github.com/prusa3d/prusa-connect/sdk/wirerpc"
 
-	"prusa-connect-otel.jamiesinn.ca/internal/otlpexport"
+	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
 )
 
 var followed = []string{
@@ -86,6 +86,14 @@ func (p *pipeline) stop(ctx context.Context) error {
 	<-p.done
 
 	return p.providers.Shutdown(ctx)
+}
+
+// flush exports pending metrics and spans now.
+func (p *pipeline) flush(ctx context.Context) error {
+	return errors.Join(
+		p.providers.MeterProvider.ForceFlush(ctx),
+		p.providers.TracerProvider.ForceFlush(ctx),
+	)
 }
 
 // follower is the follow loop's state. Only the follow goroutine uses it.

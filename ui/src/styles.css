@@ -1,0 +1,8 @@
+/* Only the utilities this module uses; the theme comes from the host page.
+   See styling-a-module.md in the Prusa Connect docs. */
+@reference 'tailwindcss';
+@reference '@prusa/connect-ui/tokens.css';
+@layer utilities {
+  @tailwind utilities;
+}
+@source './';

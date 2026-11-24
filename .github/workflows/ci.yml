@@ -20,6 +20,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: pnpm/action-setup@v5
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
       - run: make check
 
   # Same build and checks as a release, signed with a throwaway key and not
@@ -28,7 +34,9 @@ jobs:
     uses: prusa3d/prusa-connect-marketplace-publish/.github/workflows/publish.yml@v1
     with:
       path: .
+      module: connect-otel.jamiesinn.ca # gives the extension id ca.jamiesinn.connect-otel
       core-ref: v0.1.0-beta.1 # must match the .core submodule
+      bundle-command: make ui-build
       dry-run: true
     permissions:
       contents: read

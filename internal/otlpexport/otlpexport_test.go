@@ -15,18 +15,18 @@ func TestSplitEndpoint(t *testing.T) {
 		wantPath   string
 	}{
 		{
-			name:       "dynatrace activegate root path",
-			raw:        "http://activegate.example.com:9999/e/abc12345/api/v2/otlp",
+			name:       "path prefix",
+			raw:        "http://collector.example.com:4318/otlp",
 			signalPath: "/v1/metrics",
-			wantHost:   "activegate.example.com:9999",
-			wantPath:   "/e/abc12345/api/v2/otlp/v1/metrics",
+			wantHost:   "collector.example.com:4318",
+			wantPath:   "/otlp/v1/metrics",
 		},
 		{
-			name:       "trailing slash on root path",
-			raw:        "https://activegate.example.com:9999/e/abc12345/api/v2/otlp/",
+			name:       "multi-segment path prefix with trailing slash",
+			raw:        "https://collector.example.com:4318/api/otlp/",
 			signalPath: "/v1/traces",
-			wantHost:   "activegate.example.com:9999",
-			wantPath:   "/e/abc12345/api/v2/otlp/v1/traces",
+			wantHost:   "collector.example.com:4318",
+			wantPath:   "/api/otlp/v1/traces",
 		},
 		{
 			name:       "bare host:port without scheme",
@@ -36,11 +36,11 @@ func TestSplitEndpoint(t *testing.T) {
 			wantPath:   "/v1/metrics",
 		},
 		{
-			name:       "host with root path but no scheme",
-			raw:        "activegate.example.com:9999/e/abc12345/api/v2/otlp",
+			name:       "path prefix without scheme",
+			raw:        "collector.example.com:4318/otlp",
 			signalPath: "/v1/traces",
-			wantHost:   "activegate.example.com:9999",
-			wantPath:   "/e/abc12345/api/v2/otlp/v1/traces",
+			wantHost:   "collector.example.com:4318",
+			wantPath:   "/otlp/v1/traces",
 		},
 	}
 	for _, tt := range tests {
@@ -71,11 +71,11 @@ func TestParseHeaders(t *testing.T) {
 	})
 
 	t.Run("authorization value with spaces and equals", func(t *testing.T) {
-		h, err := ParseHeaders("Authorization=Api-Token dt0c01.ABC=123, X-Env = prod ")
+		h, err := ParseHeaders("Authorization=Bearer abc=123, X-Env = prod ")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := h["Authorization"], "Api-Token dt0c01.ABC=123"; got != want {
+		if got, want := h["Authorization"], "Bearer abc=123"; got != want {
 			t.Errorf("Authorization = %q, want %q", got, want)
 		}
 		if got, want := h["X-Env"], "prod"; got != want {
@@ -84,7 +84,7 @@ func TestParseHeaders(t *testing.T) {
 	})
 
 	t.Run("malformed pair errors without echoing it", func(t *testing.T) {
-		_, err := ParseHeaders("Api-Token dt0c01.SECRET")
+		_, err := ParseHeaders("Bearer SECRET")
 		if err == nil {
 			t.Fatal("expected error for pair without '='")
 		}

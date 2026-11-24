@@ -385,6 +385,28 @@ func (g *gauges) attrsOf(id string) []attribute.KeyValue {
 	return g.devices[id].attrs(id)
 }
 
+// deviceState reports whether a device is tracked, whether it is connected,
+// and how many values it has.
+func (g *gauges) deviceState(id string) (known, connected bool, values int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	d, known := g.devices[id]
+	if !known {
+		return false, false, 0
+	}
+
+	for _, series := range g.points {
+		for key := range series {
+			if key.device == id {
+				values++
+			}
+		}
+	}
+
+	return true, d.connected, values
+}
+
 func (g *gauges) counts() (devices, values, instruments int) {
 	g.instMu.Lock()
 	instruments = len(g.instruments)

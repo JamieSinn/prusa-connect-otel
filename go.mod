@@ -1,4 +1,4 @@
-module prusa-connect-otel.jamiesinn.ca
+module github.com/jamiesinn/prusa-connect-otel
 
 go 1.26.11
 

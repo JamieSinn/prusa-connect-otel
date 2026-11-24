@@ -1,0 +1,12 @@
+# A project of its own; without this pnpm joins a workspace further up.
+packages:
+  - .
+
+savePrefix: ''
+verifyDepsBeforeRun: error
+enableGlobalVirtualStore: false
+
+# @prusa/connect isn't on npm yet, so it comes from the .core submodule.
+overrides:
+  '@prusa/connect': 'link:../.core/packages/typescript'
+autoInstallPeers: false

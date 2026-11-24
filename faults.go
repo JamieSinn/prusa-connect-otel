@@ -4,12 +4,19 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/prusa3d/prusa-connect/sdk/extension"
 	"github.com/prusa3d/prusa-connect/sdk/fault"
 )
 
-// faultDomain is the module's namespace, derived by the host from the module
-// path. Error codes are registered under it so clients can match on them.
-var faultDomain = mustDomain("ca.jamiesinn.prusa-connect-otel")
+// extensionModule is the module path the extension is published under, passed
+// to the marketplace builder as `module:` in the workflows. It differs from the
+// Go module path. The host and the marketplace derive the extension's
+// namespace from it: ca.jamiesinn.connect-otel.
+const extensionModule = "connect-otel.jamiesinn.ca"
+
+// faultDomain is the module's namespace. Error codes are registered under it
+// so clients can match on them.
+var faultDomain = mustDomain(extensionModule)
 
 var routeNotFound = fault.Register(faultDomain, "ROUTE_NOT_FOUND", http.StatusNotFound, fault.Document(
 	"This module does not serve that path",
@@ -19,8 +26,20 @@ var routeNotFound = fault.Register(faultDomain, "ROUTE_NOT_FOUND", http.StatusNo
 	"path",
 ))
 
-func mustDomain(name string) fault.Domain {
-	d, err := fault.NewDomain(name)
+var notConfigured = fault.Register(faultDomain, "NOT_CONFIGURED", http.StatusConflict, fault.Document(
+	"The exporter is not configured",
+	"Set otlp_endpoint on the Settings tab.",
+	fault.RetryAllowed,
+	fault.ShowDetail,
+))
+
+func mustDomain(module string) fault.Domain {
+	namespace, err := extension.NamespaceOf(module)
+	if err != nil {
+		panic(err)
+	}
+
+	d, err := fault.NewDomain(string(namespace))
 	if err != nil {
 		panic(err)
 	}

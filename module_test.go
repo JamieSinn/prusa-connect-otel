@@ -15,9 +15,9 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/busapi"
 	"github.com/prusa3d/prusa-connect/sdk/deviceapi"
 	"github.com/prusa3d/prusa-connect/sdk/event"
-	"github.com/prusa3d/prusa-connect/sdk/extension"
+	"github.com/prusa3d/prusa-connect/sdk/routesapi"
 
-	"prusa-connect-otel.jamiesinn.ca/internal/otlpexport"
+	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
 )
 
 func benchPrinter() deviceapi.Device {
@@ -299,7 +299,7 @@ func TestConfigureRejectsInvalidSettings(t *testing.T) {
 		"bad protocol":     {map[string]any{"otlp_protocol": "udp"}, "protocol"},
 		"bad interval":     {map[string]any{"export_interval": "often"}, "export_interval"},
 		"bad prefix":       {map[string]any{"metric_prefix": "9lives"}, "metric_prefix"},
-		"malformed header": {map[string]any{"otlp_headers": "Api-Token dt0c01.SECRET"}, "otlp_headers"},
+		"malformed header": {map[string]any{"otlp_headers": "Bearer SECRET"}, "otlp_headers"},
 		"unknown key":      {map[string]any{"otlp_timeout": "5s"}, "otlp_timeout"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -330,13 +330,100 @@ func TestSecondConfigureRejected(t *testing.T) {
 	}
 }
 
+// request calls one of the module's routes.
+func request(h *harness, method, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	h.module.routes().ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+
+	return rec
+}
+
+func decodeBody[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
+	t.Helper()
+
+	var v T
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatalf("response %d is not JSON: %v: %s", rec.Code, err, rec.Body)
+	}
+
+	return v
+}
+
+func TestDeviceRoute(t *testing.T) {
+	h := newHarness(t, benchPrinter())
+
+	if r := decodeBody[deviceReport](t, request(h, http.MethodGet, "/devices/mk4-1")); r.Configured {
+		t.Errorf("before configure: %+v, want configured = false", r)
+	}
+
+	h.mustConfigure(nil)
+	h.subscribed()
+
+	// nozzle_temp, state and tools.active; the file name is not exported.
+	eventually(t, "the printer's values", func() bool {
+		r := decodeBody[deviceReport](t, request(h, http.MethodGet, "/devices/mk4-1"))
+
+		return r.Configured && r.Exported && r.Connected && r.Values == 3
+	})
+
+	if r := decodeBody[deviceReport](t, request(h, http.MethodGet, "/devices/other")); r.Exported || r.Values != 0 {
+		t.Errorf("unknown printer: %+v, want not exported", r)
+	}
+
+	h.send(busapi.Window{Events: []json.RawMessage{envelope(t, event.TypeDevicePresenceChanged, event.ClassState,
+		map[string]any{"device_id": "mk4-1", "driver": "xbuddy", "connected": false})}})
+
+	eventually(t, "the disconnected printer", func() bool {
+		r := decodeBody[deviceReport](t, request(h, http.MethodGet, "/devices/mk4-1"))
+
+		return r.Exported && !r.Connected && r.Values == 0
+	})
+}
+
+func TestExportRoute(t *testing.T) {
+	h := newHarness(t, benchPrinter())
+
+	if rec := request(h, http.MethodPost, "/export"); rec.Code != http.StatusConflict {
+		t.Errorf("before configure: status %d, want 409: %s", rec.Code, rec.Body)
+	}
+
+	// A long interval, so only the forced export reaches the collector.
+	h.mustConfigure(map[string]any{
+		"export_interval": "1h",
+		"otlp_headers":    "Authorization=Bearer SECRET",
+	})
+	h.subscribed()
+
+	rec := request(h, http.MethodPost, "/export")
+	if r := decodeBody[exportReport](t, rec); rec.Code != http.StatusOK || !r.OK || r.Error != "" {
+		t.Fatalf("POST /export = %d %+v, want ok", rec.Code, r)
+	}
+
+	if h.collector.lastMetric("prusa.connect.tools.nozzle_temp") == nil {
+		t.Error("POST /export returned before the metrics reached the collector")
+	}
+
+	h.collector.mu.Lock()
+	h.collector.refuse = 1_000_000
+	h.collector.mu.Unlock()
+
+	rec = request(h, http.MethodPost, "/export")
+	if strings.Contains(rec.Body.String(), "SECRET") {
+		t.Fatalf("POST /export leaks a header value: %s", rec.Body)
+	}
+
+	if r := decodeBody[exportReport](t, rec); rec.Code != http.StatusOK || r.OK || r.Error == "" {
+		t.Errorf("POST /export against a refusing collector = %d %+v, want ok = false with an error", rec.Code, r)
+	}
+}
+
 func TestStatusReportsExportFailureUntilRecovery(t *testing.T) {
 	h := newHarness(t, benchPrinter())
 	h.collector.mu.Lock()
 	h.collector.refuse = 1_000_000
 	h.collector.mu.Unlock()
 
-	h.mustConfigure(map[string]any{"otlp_headers": "Authorization=Api-Token dt0c01.SECRET"})
+	h.mustConfigure(map[string]any{"otlp_headers": "Authorization=Bearer SECRET"})
 	h.subscribed()
 
 	read := func() statusReport {
@@ -482,24 +569,45 @@ func TestVersionsMatch(t *testing.T) {
 	}
 }
 
-// The host derives the namespace from the module path, and the marketplace
-// uses it as the extension id. Error codes must be registered under it.
-func TestFaultDomainMatchesModulePath(t *testing.T) {
-	gomod, err := os.ReadFile("go.mod")
-	if err != nil {
+// Both builder calls must publish under extensionModule. Without module: the
+// builder would use the Go module path, and the extension id would change.
+func TestWorkflowsPublishUnderExtensionModule(t *testing.T) {
+	if got, want := faultDomain.String(), "ca.jamiesinn.connect-otel"; got != want {
+		t.Errorf("fault domain = %s, want %s", got, want)
+	}
+
+	for _, workflow := range []string{".github/workflows/ci.yml", ".github/workflows/release.yml"} {
+		raw, err := os.ReadFile(workflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		found := false
+
+		for line := range strings.Lines(string(raw)) {
+			value, ok := strings.CutPrefix(strings.TrimSpace(line), "module:")
+			if !ok {
+				continue
+			}
+
+			found = true
+			value, _, _ = strings.Cut(value, "#")
+
+			if strings.TrimSpace(value) != extensionModule {
+				t.Errorf("%s publishes as module %s, want %s", workflow, strings.TrimSpace(value), extensionModule)
+			}
+		}
+
+		if !found {
+			t.Errorf("%s doesn't pass module: %s to the builder", workflow, extensionModule)
+		}
+	}
+}
+
+// The host rejects a module whose openapi.json it can't parse.
+func TestOpenAPIFragmentAccepted(t *testing.T) {
+	if _, err := routesapi.ParseFragment(openAPI); err != nil {
 		t.Fatal(err)
-	}
-
-	module, _, _ := strings.Cut(string(gomod), "\n")
-	module = strings.TrimSpace(strings.TrimPrefix(module, "module"))
-
-	namespace, err := extension.NamespaceOf(module)
-	if err != nil {
-		t.Fatalf("module path %q: %v", module, err)
-	}
-
-	if faultDomain.String() != string(namespace) {
-		t.Errorf("fault domain %s != namespace %s of module path %s", faultDomain, namespace, module)
 	}
 }
 

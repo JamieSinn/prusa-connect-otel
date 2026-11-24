@@ -14,12 +14,16 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/routesapi"
 	"github.com/prusa3d/prusa-connect/sdk/wirerpc"
 
-	"prusa-connect-otel.jamiesinn.ca/internal/otlpexport"
+	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
 )
 
-// flushBudget bounds the final export on shutdown, so an unresponsive
-// collector can't stop the process from exiting.
-const flushBudget = 5 * time.Second
+const (
+	// flushBudget bounds the final export on shutdown, so an unresponsive
+	// collector can't stop the process from exiting.
+	flushBudget = 5 * time.Second
+	// exportBudget bounds an export requested through POST /export.
+	exportBudget = 15 * time.Second
+)
 
 var (
 	errConfiguredTwice = errors.New("already configured; the host restarts the module to change settings")
@@ -138,15 +142,44 @@ func (m *module) routes() http.Handler {
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
 		report := m.status.report()
 
-		m.mu.Lock()
-		if m.pipeline != nil {
-			report.Devices, report.Values, report.Metrics = m.pipeline.gauges.counts()
-			report.Dropped = m.pipeline.gauges.dropped.Load()
+		if p := m.current(); p != nil {
+			report.Devices, report.Values, report.Metrics = p.gauges.counts()
+			report.Dropped = p.gauges.dropped.Load()
 		}
-		m.mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(report)
+		writeJSON(w, report)
+	})
+
+	mux.HandleFunc("GET /devices/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var report deviceReport
+
+		if p := m.current(); p != nil {
+			report.Configured = true
+			report.Exported, report.Connected, report.Values = p.gauges.deviceState(r.PathValue("id"))
+		}
+
+		writeJSON(w, report)
+	})
+
+	mux.HandleFunc("POST /export", func(w http.ResponseWriter, r *http.Request) {
+		p := m.current()
+		if p == nil {
+			writeFault(w, r, notConfigured.New("otlp_endpoint is not set"))
+
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), exportBudget)
+		defer cancel()
+
+		var report exportReport
+		if err := p.flush(ctx); err != nil {
+			report.Error = err.Error()
+		} else {
+			report.OK = true
+		}
+
+		writeJSON(w, report)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +189,34 @@ func (m *module) routes() http.Handler {
 	})
 
 	return mux
+}
+
+// current returns the running pipeline, or nil before configure and after
+// shutdown.
+func (m *module) current() *pipeline {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.pipeline
+}
+
+// deviceReport is the body of GET /devices/{id}.
+type deviceReport struct {
+	Configured bool `json:"configured"`
+	Exported   bool `json:"exported"`
+	Connected  bool `json:"connected"`
+	Values     int  `json:"values"`
+}
+
+// exportReport is the body of POST /export.
+type exportReport struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func writeJSON(w http.ResponseWriter, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // redacted masks any password in the endpoint URL.
