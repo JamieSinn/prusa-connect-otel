@@ -1,11 +1,6 @@
-# Prusa Connect module manifest. The extension id, ca.jamiesinn.connect-otel,
-# comes from the module path the workflows publish under (connect-otel.jamiesinn.ca).
-
 name: otel-exporter
 kind: sink
-# x-release-please-start-version
 version: 0.1.0
-# x-release-please-end
 license: MIT
 title: OpenTelemetry exporter
 summary: Exports printer telemetry as OTLP metrics and finished prints as spans.
@@ -17,31 +12,28 @@ platforms:
   - linux_arm64
   - darwin_arm64
   - windows_amd64
-
 require:
-  core: ">=0.1.0-beta.1"
-  core-device.list: "*"
-  core-device.get: "*"
-
+  core: '>=0.1.0-beta.1'
+  core-device.list: '*'
+  core-device.get: '*'
 permissions:
-  - observe # read printer telemetry, presence and finished prints
-
-# The manifest has to list ports, so these are the common OTLP ones: HTTPS,
-# OTLP gRPC and OTLP HTTP.
+  - observe
 egress:
   - option: otlp_endpoint
-    ports: [443, 4317, 4318]
+    ports:
+      - 443
+      - 4317
+      - 4318
     why: Sends metrics and print spans to the configured OTLP collector.
-    sends: "Telemetry values with each printer's id, name, vendor and model, and one span per finished print: file name, path, outcome, progress, print time and filament used."
-
+    sends: >-
+      Telemetry values with each printer's id, name, vendor and model, and one
+      span per finished print: file name, path, outcome, progress, print time
+      and filament used.
 needs:
   memory_mib: 64
-
-# Each entry under contributes has a matching host.register call in
-# ui/src/index.ts.
 ui:
   entry: ui/index.js
-  library: ">=0.1.0 <1.0.0"
+  library: '>=0.1.0 <1.0.0'
   contributes:
     settings:
       - id: status
@@ -53,38 +45,49 @@ ui:
       - id: export-health
         title: OpenTelemetry
         description: Export health for metrics and print spans.
-        size: {w: 4, h: 3}
-        least: {w: 3, h: 2}
-
+        size:
+          w: 4
+          h: 3
+        least:
+          w: 3
+          h: 2
 options:
   - key: otlp_endpoint
     type: string
     required: true
-    summary: "Collector address, as host:port or a URL. A URL path is used as a prefix for /v1/metrics and /v1/traces. https:// uses TLS, http:// does not."
+    summary: >-
+      Collector address, as host:port or a URL. A URL path is used as a prefix
+      for /v1/metrics and /v1/traces. https:// uses TLS, http:// does not.
   - key: otlp_protocol
     type: string
-    default: "http/protobuf"
-    summary: "http/protobuf or grpc. gRPC ignores the URL path."
+    default: http/protobuf
+    summary: http/protobuf or grpc. gRPC ignores the URL path.
   - key: otlp_headers
     type: secret
-    summary: "Extra request headers as comma-separated key=value pairs, e.g. Authorization=Bearer <token>."
+    summary: >-
+      Extra request headers as comma-separated key=value pairs, e.g.
+      Authorization=Bearer <token>.
   - key: otlp_insecure
     type: bool
-    default: "false"
-    summary: Disable TLS when otlp_endpoint has no scheme. Ignored if the endpoint has a scheme.
+    default: 'false'
+    summary: >-
+      Disable TLS when otlp_endpoint has no scheme. Ignored if the endpoint has
+      a scheme.
   - key: otlp_tls_skip_verify
     type: bool
-    default: "false"
+    default: 'false'
     summary: Skip certificate verification, e.g. for a self-signed collector.
   - key: service_name
     type: string
-    default: "prusa-connect-otel"
+    default: prusa-connect-otel
     summary: The service.name resource attribute.
   - key: export_interval
     type: duration
-    default: "10s"
+    default: 10s
     summary: How often metrics are exported.
   - key: metric_prefix
     type: string
-    default: "prusa.connect"
-    summary: "Prefix for metric names. /tools/0/nozzle_temp becomes <prefix>.tools.nozzle_temp."
+    default: prusa.connect
+    summary: >-
+      Prefix for metric names. /tools/0/nozzle_temp becomes
+      <prefix>.tools.nozzle_temp.
