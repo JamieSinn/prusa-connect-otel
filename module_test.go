@@ -11,10 +11,12 @@ import (
 	"time"
 
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	"gopkg.in/yaml.v3"
 
 	"github.com/prusa3d/prusa-connect/sdk/busapi"
 	"github.com/prusa3d/prusa-connect/sdk/deviceapi"
 	"github.com/prusa3d/prusa-connect/sdk/event"
+	"github.com/prusa3d/prusa-connect/sdk/manifest"
 	"github.com/prusa3d/prusa-connect/sdk/routesapi"
 
 	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
@@ -496,34 +498,45 @@ func TestNewMetricsDuringCollection(t *testing.T) {
 	}
 }
 
-func TestManifestDefaults(t *testing.T) {
-	manifest, err := os.ReadFile("module.yaml")
+// manifestOf parses module.yaml the way the host does, so the tests check
+// values rather than formatting.
+func manifestOf(t *testing.T) manifest.Manifest {
+	t.Helper()
+
+	document, err := os.ReadFile("module.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for key, value := range map[string]string{
+	m, err := manifest.Parse("module.yaml", document, yaml.Unmarshal)
+	if err != nil {
+		t.Fatalf("the host would reject module.yaml: %v", err)
+	}
+
+	return m
+}
+
+func TestManifestDefaults(t *testing.T) {
+	defaults := map[string]string{}
+	for _, o := range manifestOf(t).Options {
+		defaults[o.Key] = o.Default
+	}
+
+	for key, want := range map[string]string{
 		"otlp_protocol":   defaultProtocol,
 		"service_name":    defaultServiceName,
 		"export_interval": defaultExportInterval,
 		"metric_prefix":   defaultMetricPrefix,
 	} {
-		entry := "- key: " + key + "\n    type: "
-
-		i := strings.Index(string(manifest), entry)
-		if i < 0 {
+		got, ok := defaults[key]
+		if !ok {
 			t.Errorf("module.yaml has no option %s", key)
 
 			continue
 		}
 
-		rest := string(manifest)[i:]
-		if next := strings.Index(rest[1:], "- key:"); next > 0 {
-			rest = rest[:next+1]
-		}
-
-		if !strings.Contains(rest, `default: "`+value+`"`) {
-			t.Errorf("module.yaml default for %s is not %q", key, value)
+		if got != want {
+			t.Errorf("module.yaml default for %s = %q, want %q", key, got, want)
 		}
 	}
 }
@@ -531,24 +544,7 @@ func TestManifestDefaults(t *testing.T) {
 // The host won't start the module if plugin.info and module.yaml disagree on
 // the version. release-please bumps all three files.
 func TestVersionsMatch(t *testing.T) {
-	manifest, err := os.ReadFile("module.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var declared string
-
-	for line := range strings.Lines(string(manifest)) {
-		if v, ok := strings.CutPrefix(line, "version:"); ok {
-			declared = strings.TrimSpace(v)
-
-			break
-		}
-	}
-
-	if declared == "" {
-		t.Fatal("module.yaml has no version")
-	}
+	declared := manifestOf(t).Version
 
 	if release.String() != declared {
 		t.Errorf("main.go version %s != module.yaml version %s", release, declared)
@@ -560,7 +556,7 @@ func TestVersionsMatch(t *testing.T) {
 		} `json:"info"`
 	}
 
-	if err = json.Unmarshal(openAPI, &doc); err != nil {
+	if err := json.Unmarshal(openAPI, &doc); err != nil {
 		t.Fatal(err)
 	}
 

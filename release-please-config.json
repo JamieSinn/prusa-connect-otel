@@ -9,7 +9,10 @@
     ".": {
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "module.yaml",
+        {
+          "type": "generic",
+          "path": "module.yaml"
+        },
         "main.go",
         {
           "type": "json",
