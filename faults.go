@@ -8,11 +8,10 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/fault"
 )
 
-// extensionModule is the module path the extension is published under, passed
-// to the marketplace builder as `module:` in the workflows. It differs from the
-// Go module path. The host and the marketplace derive the extension's
-// namespace from it: ca.jamiesinn.connect-otel.
-const extensionModule = "connect-otel.jamiesinn.ca"
+// extensionModule is the module path the extension is published under, the
+// same as go.mod's. The host and the marketplace derive the extension id from
+// it: com.github.aux.jamiesinn.connect-otel.
+const extensionModule = "github.com/jamiesinn/connect-otel"
 
 // faultDomain is the module's namespace. Error codes are registered under it
 // so clients can match on them.

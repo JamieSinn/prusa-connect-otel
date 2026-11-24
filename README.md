@@ -8,7 +8,7 @@ It reads the Prusa Connect event stream rather than polling printers. For a
 single PrusaLink printer without Prusa Connect, see
 [otel-prusa-link](https://github.com/JamieSinn/otel-prusa-link).
 
-- Extension id: `ca.jamiesinn.connect-otel` (published as module `connect-otel.jamiesinn.ca`)
+- Extension id: `com.github.aux.jamiesinn.connect-otel` (from the module path `github.com/jamiesinn/connect-otel`)
 - Permission: `observe`
 - Network access: only the host in `otlp_endpoint`
 
@@ -96,7 +96,7 @@ The manifest allows outbound connections to the `otlp_endpoint` host on ports
 
 ## Status
 
-`GET /api/v1/modules/ca.jamiesinn.connect-otel/status`:
+`GET /api/v1/modules/com.github.aux.jamiesinn.connect-otel/status`:
 
 ```json
 {
@@ -188,7 +188,7 @@ server's config, and restart the server:
 ```sh
 make ui-build
 go build -o ui/dist/otel-exporter_$(go env GOOS)_$(go env GOARCH) .
-go -C .core run ./cmd/prusa-connect module add connect-otel.jamiesinn.ca@<version> \
+go -C .core run ./cmd/prusa-connect module add github.com/jamiesinn/connect-otel@<version> \
   -config /path/to/its/config.yaml -from "$PWD/ui/dist" -approve
 ```
 

@@ -15,7 +15,7 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/event"
 	"github.com/prusa3d/prusa-connect/sdk/wirerpc"
 
-	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
+	"github.com/jamiesinn/connect-otel/internal/otlpexport"
 )
 
 var followed = []string{

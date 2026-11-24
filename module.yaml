@@ -1,6 +1,9 @@
 name: otel-exporter
 kind: sink
+# release-please bumps the version between these markers.
+# x-release-please-start-version
 version: 0.1.0
+# x-release-please-end
 license: MIT
 title: OpenTelemetry exporter
 summary: Exports printer telemetry as OTLP metrics and finished prints as spans.

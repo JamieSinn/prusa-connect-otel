@@ -42,6 +42,7 @@ jobs:
     uses: prusa3d/prusa-connect-marketplace-publish/.github/workflows/publish.yml@v1
     with:
       path: .
+      module: github.com/jamiesinn/connect-otel # extension id com.github.aux.jamiesinn.connect-otel
       core-ref: v0.1.0-beta.1 # must match the .core submodule
       bundle-command: make ui-build
       # This run isn't triggered by a release event, so pass the notes.

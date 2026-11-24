@@ -9,9 +9,8 @@ GOLANGCI_VERSION := 2.14.0
 GOLANGCI_LINT ?= $(shell go env GOPATH)/bin/golangci-lint
 
 CORE := .core
-# The id the extension is published under: ca.jamiesinn.connect-otel. See
-# extensionModule in faults.go.
-NAMESPACE := ca.jamiesinn.connect-otel
+# The extension id, derived from the module path; see extensionModule in faults.go.
+NAMESPACE := com.github.aux.jamiesinn.connect-otel
 CLIENT_FLAGS := -module -document "$(CURDIR)/openapi.json" -namespace $(NAMESPACE) \
 	-name otel-exporter-client -out "$(CURDIR)/client"
 

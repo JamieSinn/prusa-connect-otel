@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
+	"github.com/jamiesinn/connect-otel/internal/otlpexport"
 )
 
 // Defaults for settings the host sends empty. They must match the defaults in

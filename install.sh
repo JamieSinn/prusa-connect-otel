@@ -14,7 +14,7 @@ CHECKOUT=$HERE/.core
 NAME=$(sed -n 's/^name:[[:space:]]*//p' "$HERE/module.yaml" | head -1)
 VERSION=$(sed -n 's/^version:[[:space:]]*//p' "$HERE/module.yaml" | head -1)
 # The path the extension is published under; see extensionModule in faults.go.
-MODULE=connect-otel.jamiesinn.ca
+MODULE=github.com/jamiesinn/connect-otel
 
 TARGET=${TARGET:-demo}
 WORK=$CHECKOUT/bin/$NAME-$TARGET

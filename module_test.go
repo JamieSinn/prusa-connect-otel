@@ -19,7 +19,7 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/manifest"
 	"github.com/prusa3d/prusa-connect/sdk/routesapi"
 
-	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
+	"github.com/jamiesinn/connect-otel/internal/otlpexport"
 )
 
 func benchPrinter() deviceapi.Device {
@@ -541,6 +541,21 @@ func TestManifestDefaults(t *testing.T) {
 	}
 }
 
+// release-please bumps module.yaml's version only between these markers. If
+// they go missing the release ships with the old version, which the host
+// refuses because plugin.info reports the new one.
+func TestManifestVersionHasReleasePleaseMarkers(t *testing.T) {
+	document, err := os.ReadFile("module.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "# x-release-please-start-version\nversion: " + manifestOf(t).Version + "\n# x-release-please-end\n"
+	if !strings.Contains(string(document), want) {
+		t.Errorf("module.yaml's version line is not wrapped in x-release-please markers:\n%s", want)
+	}
+}
+
 // The host won't start the module if plugin.info and module.yaml disagree on
 // the version. release-please bumps all three files.
 func TestVersionsMatch(t *testing.T) {
@@ -565,17 +580,27 @@ func TestVersionsMatch(t *testing.T) {
 	}
 }
 
-// Both builder calls must publish under extensionModule. Without module: the
-// builder would use the Go module path, and the extension id would change.
+// The extension id comes from the module path. go.mod, both builder calls and
+// the fault domain must all use the same one, or the marketplace refuses the
+// release or the module's error codes land under another id.
 func TestWorkflowsPublishUnderExtensionModule(t *testing.T) {
-	if got, want := faultDomain.String(), "ca.jamiesinn.connect-otel"; got != want {
+	if got, want := faultDomain.String(), "com.github.aux.jamiesinn.connect-otel"; got != want {
 		t.Errorf("fault domain = %s, want %s", got, want)
 	}
 
+	gomod, err := os.ReadFile("go.mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first, _, _ := strings.Cut(string(gomod), "\n"); first != "module "+extensionModule {
+		t.Errorf("go.mod starts %q, want module %s", first, extensionModule)
+	}
+
 	for _, workflow := range []string{".github/workflows/ci.yml", ".github/workflows/release.yml"} {
-		raw, err := os.ReadFile(workflow)
-		if err != nil {
-			t.Fatal(err)
+		raw, readErr := os.ReadFile(workflow)
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
 
 		found := false

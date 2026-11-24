@@ -37,7 +37,7 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/modules/ca.jamiesinn.connect-otel/devices/{id}": {
+    "/api/v1/modules/com.github.aux.jamiesinn.connect-otel/devices/{id}": {
       "get": {
         "operationId": "read-device-export",
         "summary": "Printer export state",
@@ -91,7 +91,7 @@
         }
       }
     },
-    "/api/v1/modules/ca.jamiesinn.connect-otel/export": {
+    "/api/v1/modules/com.github.aux.jamiesinn.connect-otel/export": {
       "post": {
         "operationId": "send-export",
         "summary": "Export now",
@@ -133,7 +133,7 @@
         }
       }
     },
-    "/api/v1/modules/ca.jamiesinn.connect-otel/status": {
+    "/api/v1/modules/com.github.aux.jamiesinn.connect-otel/status": {
       "get": {
         "operationId": "read-export-status",
         "summary": "Export status",

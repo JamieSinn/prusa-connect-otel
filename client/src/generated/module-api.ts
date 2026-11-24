@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/v1/modules/ca.jamiesinn.connect-otel/devices/{id}": {
+    "/api/v1/modules/com.github.aux.jamiesinn.connect-otel/devices/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -24,7 +24,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/modules/ca.jamiesinn.connect-otel/export": {
+    "/api/v1/modules/com.github.aux.jamiesinn.connect-otel/export": {
         parameters: {
             query?: never;
             header?: never;
@@ -44,7 +44,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/modules/ca.jamiesinn.connect-otel/status": {
+    "/api/v1/modules/com.github.aux.jamiesinn.connect-otel/status": {
         parameters: {
             query?: never;
             header?: never;
