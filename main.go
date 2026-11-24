@@ -25,7 +25,7 @@ import (
 // The host refuses to start the module if these differ from module.yaml.
 const (
 	name    = "otel-exporter"
-	release = extension.Version("0.1.1") // x-release-please-version
+	release = extension.Version("0.1.2") // x-release-please-version
 )
 
 //go:embed openapi.json
