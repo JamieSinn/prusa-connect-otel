@@ -1,0 +1,92 @@
+# The manifest for otel-exporter, a Prusa Connect module that is one Go process
+# and draws nothing in the app. It reads the fleet's telemetry and print
+# history off the host's event stream and exports them over OTLP.
+#
+# `prusa-connect module add` reads it out of the release and writes one
+# declaration from it.
+#
+# The namespace is absent on purpose. The host derives it from the repository
+# address the operator installed, so no module can name another module's
+# address. Installed as github.com/jamiesinn/prusa-connect-otel it is
+# com.github.aux.jamiesinn.prusa-connect-otel.
+
+name: otel-exporter
+kind: sink
+# release-please bumps the version between the markers; see release-please-config.json.
+# x-release-please-start-version
+version: 0.1.0
+# x-release-please-end
+license: MIT
+title: OpenTelemetry exporter
+summary: Exports every printer's telemetry as OTLP metrics and every finished print as a span, to a collector you choose.
+codeowner: Jamie Sinn
+contract_major: 1
+openapi: openapi.json
+platforms:
+  - linux_amd64
+  - linux_arm64
+  - darwin_arm64
+  - windows_amd64
+
+# device.list seeds every gauge with the value it holds now, because the stream
+# only says when a value changes. device.get names a printer first seen on the
+# stream.
+require:
+  core: ">=0.1.0-beta.1"
+  core-device.list: "*"
+  core-device.get: "*"
+
+# The module reads the fleet and the event stream as itself, with nobody
+# behind the call. It sends nothing to a printer.
+permissions:
+  # read each printer's telemetry, presence, record and finished prints
+  - observe
+
+# The collector is wherever the operator points otlp_endpoint. A manifest pins
+# the ports of an option's host, so the common OTLP ones are listed: TLS, OTLP
+# gRPC, OTLP HTTP, and a Dynatrace ActiveGate. The port the process dials is
+# the one in otlp_endpoint.
+egress:
+  - option: otlp_endpoint
+    ports: [443, 4317, 4318, 9999]
+    why: Exports the fleet's metrics and print spans over OTLP to the operator's collector, on the port otlp_endpoint names.
+    sends: "Telemetry values with each printer's id, name, vendor and model, and one span per finished print: file name, path, outcome, progress, print time and filament used."
+
+# The process holds one gauge value per printer and state path, the OTLP SDK and
+# its export batches.
+needs:
+  memory_mib: 64
+
+# Every setting this module reads. Defaults are the code's own; see settings.go.
+options:
+  - key: otlp_endpoint
+    type: string
+    required: true
+    summary: "The collector, as host:port or a URL. A root path is kept and /v1/metrics and /v1/traces are joined onto it. https:// uses TLS, http:// does not."
+  - key: otlp_protocol
+    type: string
+    default: "http/protobuf"
+    summary: "How to send: http/protobuf or grpc. gRPC ignores a root path."
+  - key: otlp_headers
+    type: secret
+    summary: "Extra request headers as comma-separated key=value pairs, such as Authorization=Api-Token dt0c01.XXXX."
+  - key: otlp_insecure
+    type: bool
+    default: "false"
+    summary: Send without TLS when otlp_endpoint has no scheme. A scheme in the endpoint decides instead.
+  - key: otlp_tls_skip_verify
+    type: bool
+    default: "false"
+    summary: Accept a collector certificate that does not verify, such as a self-signed one.
+  - key: service_name
+    type: string
+    default: "prusa-connect-otel"
+    summary: The service.name resource attribute on everything exported.
+  - key: export_interval
+    type: duration
+    default: "10s"
+    summary: How often the gauges are exported. The printers are not asked for anything more often.
+  - key: metric_prefix
+    type: string
+    default: "prusa.connect"
+    summary: "The start of every metric name. The state path /tools/0/nozzle_temp becomes <prefix>.tools.nozzle_temp."

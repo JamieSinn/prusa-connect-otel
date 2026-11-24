@@ -1,0 +1,114 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "otel-exporter",
+    "version": "0.1.0",
+    "description": "The route otel-exporter serves. Every path is relative to the mount the host assigns, and the host serves this document rebased under it at <mount>/openapi.json."
+  },
+  "paths": {
+    "/status": {
+      "get": {
+        "operationId": "read-export-status",
+        "summary": "Whether the fleet's telemetry reaches the collector",
+        "description": "Whether the module is reading the host's event stream, and whether its latest metric and trace exports reached the OTLP collector. A failure is reported while it is the latest outcome and is cleared by the next success. The host takes view_resource on the module's instance before this is called.",
+        "responses": {
+          "200": {
+            "description": "The exporter's status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configured": {
+                      "type": "boolean",
+                      "description": "Whether the host has sent the settings and the exporters are built."
+                    },
+                    "endpoint": {
+                      "type": "string",
+                      "description": "The collector, with any password in it masked."
+                    },
+                    "protocol": {
+                      "type": "string",
+                      "description": "http/protobuf or grpc."
+                    },
+                    "stream": {
+                      "$ref": "#/components/schemas/Outcome"
+                    },
+                    "last_window": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When the module last read a window off the event stream."
+                    },
+                    "exports": {
+                      "type": "object",
+                      "description": "The latest outcome of each signal's export, keyed metrics and traces. A signal is absent until it has exported once.",
+                      "additionalProperties": {
+                        "$ref": "#/components/schemas/Outcome"
+                      }
+                    },
+                    "devices": {
+                      "type": "integer",
+                      "description": "Printers the module holds."
+                    },
+                    "values": {
+                      "type": "integer",
+                      "description": "Gauge values held, one per printer and state path."
+                    },
+                    "metrics": {
+                      "type": "integer",
+                      "description": "Gauge metric names created."
+                    },
+                    "dropped_values": {
+                      "type": "integer",
+                      "description": "Values dropped because the bound of 256 gauge metric names was reached."
+                    }
+                  },
+                  "required": [
+                    "configured",
+                    "stream",
+                    "exports",
+                    "devices",
+                    "values",
+                    "metrics",
+                    "dropped_values"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Outcome": {
+        "type": "object",
+        "description": "The latest result of something the module retries.",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether the latest attempt succeeded."
+          },
+          "last_success": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When an attempt last succeeded."
+          },
+          "failing_since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the current run of failures began. Absent while ok."
+          },
+          "error": {
+            "type": "string",
+            "description": "The latest failure. Absent while ok."
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# What a build writes. It is made again from the files beside it, so it is
+# never committed.
+/release/
+/bin/
+# What `go build` writes here.
+/prusa-connect-otel
+# Editor settings.
+/.idea/
