@@ -9,10 +9,7 @@ import (
 	"time"
 )
 
-// A collector that stays down produces the same SDK error on every export. It
-// is logged once per window, a different error is logged at once, and the same
-// error is logged again once the window has passed.
-func TestSDKErrorsAreLoggedOncePerWindow(t *testing.T) {
+func TestSDKErrorsRateLimited(t *testing.T) {
 	var out bytes.Buffer
 
 	h := newSDKErrors(slog.New(slog.NewTextHandler(&out, nil)))
@@ -29,17 +26,17 @@ func TestSDKErrorsAreLoggedOncePerWindow(t *testing.T) {
 	h.Handle(nil)
 
 	if got := strings.Count(out.String(), "\n"); got != 2 {
-		t.Fatalf("logged %d lines for 100 repeats and one new error, want 2:\n%s", got, out.String())
+		t.Fatalf("logged %d lines, want 2:\n%s", got, out.String())
 	}
 
 	now = now.Add(repeatWindow)
 	h.Handle(down)
 
 	if got := strings.Count(out.String(), "\n"); got != 3 {
-		t.Fatalf("the error was not logged again after the window:\n%s", out.String())
+		t.Fatalf("error not logged again after the window:\n%s", out.String())
 	}
 
 	if len(h.logged) != 1 {
-		t.Errorf("the handler holds %d messages, want only the one logged in this window", len(h.logged))
+		t.Errorf("%d messages tracked, want 1", len(h.logged))
 	}
 }

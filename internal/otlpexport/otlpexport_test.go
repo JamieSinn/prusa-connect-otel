@@ -16,17 +16,17 @@ func TestSplitEndpoint(t *testing.T) {
 	}{
 		{
 			name:       "dynatrace activegate root path",
-			raw:        "http://activegate.sinn.dev:9999/e/qtr1392d/api/v2/otlp",
+			raw:        "http://activegate.example.com:9999/e/abc12345/api/v2/otlp",
 			signalPath: "/v1/metrics",
-			wantHost:   "activegate.sinn.dev:9999",
-			wantPath:   "/e/qtr1392d/api/v2/otlp/v1/metrics",
+			wantHost:   "activegate.example.com:9999",
+			wantPath:   "/e/abc12345/api/v2/otlp/v1/metrics",
 		},
 		{
 			name:       "trailing slash on root path",
-			raw:        "https://activegate.sinn.dev:9999/e/qtr1392d/api/v2/otlp/",
+			raw:        "https://activegate.example.com:9999/e/abc12345/api/v2/otlp/",
 			signalPath: "/v1/traces",
-			wantHost:   "activegate.sinn.dev:9999",
-			wantPath:   "/e/qtr1392d/api/v2/otlp/v1/traces",
+			wantHost:   "activegate.example.com:9999",
+			wantPath:   "/e/abc12345/api/v2/otlp/v1/traces",
 		},
 		{
 			name:       "bare host:port without scheme",
@@ -37,10 +37,10 @@ func TestSplitEndpoint(t *testing.T) {
 		},
 		{
 			name:       "host with root path but no scheme",
-			raw:        "activegate.sinn.dev:9999/e/qtr1392d/api/v2/otlp",
+			raw:        "activegate.example.com:9999/e/abc12345/api/v2/otlp",
 			signalPath: "/v1/traces",
-			wantHost:   "activegate.sinn.dev:9999",
-			wantPath:   "/e/qtr1392d/api/v2/otlp/v1/traces",
+			wantHost:   "activegate.example.com:9999",
+			wantPath:   "/e/abc12345/api/v2/otlp/v1/traces",
 		},
 	}
 	for _, tt := range tests {
@@ -60,13 +60,13 @@ func TestSplitEndpoint(t *testing.T) {
 }
 
 func TestParseHeaders(t *testing.T) {
-	t.Run("empty yields nil", func(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
 		h, err := ParseHeaders("   ")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if h != nil {
-			t.Errorf("got %v, want nil", h)
+		if len(h) != 0 {
+			t.Errorf("got %v, want no headers", h)
 		}
 	})
 
@@ -112,7 +112,7 @@ func TestNormalized(t *testing.T) {
 	for _, tt := range tests {
 		o := Options{Endpoint: tt.endpoint, Insecure: tt.insecure}.Normalized()
 		if o.Endpoint != tt.wantEndpoint || o.Insecure != tt.wantInsecure {
-			t.Errorf("Normalize(%q, insecure=%v) = (%q, %v), want (%q, %v)",
+			t.Errorf("Normalized(%q, insecure=%v) = (%q, %v), want (%q, %v)",
 				tt.endpoint, tt.insecure, o.Endpoint, o.Insecure, tt.wantEndpoint, tt.wantInsecure)
 		}
 	}

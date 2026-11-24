@@ -1,7 +1,6 @@
 #!/bin/sh
-# Fails unless the .core submodule is the commit that core-ref names in every
-# workflow handing it to the marketplace's builder. The builder clones core-ref
-# into .core/ itself, so the two must be one commit.
+# Checks that core-ref in each workflow resolves to the .core submodule commit.
+# The marketplace builder checks out core-ref itself, so they must match.
 set -eu
 
 url=$(git config -f .gitmodules submodule..core.url)
@@ -15,16 +14,16 @@ fi
 
 status=0
 for ref in $refs; do
-	# An annotated tag's commit is on its ^{} line, which sorts after the tag.
+	# For annotated tags the commit is on the ^{} line, which sorts last.
 	commit=$(git ls-remote "$url" "refs/tags/$ref" "refs/tags/$ref^{}" "refs/heads/$ref" | sort -k2 | tail -n 1 | cut -f1)
 	if [ -z "$commit" ]; then
-		echo "core-ref $ref is not a tag or branch of $url" >&2
+		echo "core-ref $ref: no such tag or branch in $url" >&2
 		status=1
 	elif [ "$commit" != "$pinned" ]; then
-		echo "core-ref $ref is $commit, but the .core submodule is $pinned" >&2
+		echo "core-ref $ref is $commit but .core is $pinned" >&2
 		status=1
 	else
-		echo "core-ref $ref is the .core submodule, $pinned"
+		echo "core-ref $ref matches .core ($pinned)"
 	fi
 done
 

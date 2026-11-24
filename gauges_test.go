@@ -8,7 +8,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-func TestSeriesOfMapsPathsOntoMetrics(t *testing.T) {
+func TestSeriesOf(t *testing.T) {
 	for _, tc := range []struct {
 		path, name, unit string
 		attrs            []attribute.KeyValue
@@ -32,7 +32,6 @@ func TestSeriesOfMapsPathsOntoMetrics(t *testing.T) {
 		{"/temperature/chamber_target", "p.temperature.chamber_target", "Cel", nil},
 		{"/chamber/fan_1_rpm", "p.chamber.fan_1_rpm", "{rpm}", nil},
 		{"/temp_bed", "p.temp_bed", "Cel", nil},
-		// "temp" inside another word is not a temperature.
 		{"/job/attempts", "p.job.attempts", "", nil},
 		{"/mmu/retry_attempts", "p.mmu.retry_attempts", "", nil},
 	} {
@@ -42,8 +41,7 @@ func TestSeriesOfMapsPathsOntoMetrics(t *testing.T) {
 		}
 	}
 
-	// No name, or a name that is an identifier: a number there labels a job or
-	// a dialog and measures nothing.
+	// No name, or an identifier field.
 	for _, path := range []string{"", "/", "/0/1", "/!!!", "/job/id", "/dialog/id", "/tools/0/spool_id"} {
 		if s, ok := seriesOf("p", path); ok {
 			t.Errorf("seriesOf(%q) = %+v, want no metric", path, s)
@@ -51,7 +49,7 @@ func TestSeriesOfMapsPathsOntoMetrics(t *testing.T) {
 	}
 }
 
-func TestDecodeKeepsNumbersBooleansAndStateWords(t *testing.T) {
+func TestDecode(t *testing.T) {
 	for _, tc := range []struct {
 		path, raw string
 		value     float64

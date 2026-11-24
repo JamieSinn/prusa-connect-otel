@@ -1,41 +1,33 @@
 name: Release
-# release-please keeps a release pull request open against main. It bumps the
-# version in module.yaml, main.go and openapi.json and writes CHANGELOG.md from
-# the Conventional Commits merged since the last release. Merging that pull
-# request tags v<version>, creates the GitHub release, and hands the commit to
-# the marketplace's builder in the same run. The builder builds every platform
-# itself and publishes the build with the commit's source. A person at Prusa
-# reviews it before operators can install it.
+
+# release-please maintains a release PR. Merging it creates the release, and
+# the publish job sends that commit to the Prusa Plugin Marketplace builder.
 #
-# Publishing is a job here, not a workflow on `release: published`: a release
-# created with GITHUB_TOKEN starts no other workflow.
+# Publishing runs here rather than on `release: published` because releases
+# created with GITHUB_TOKEN don't trigger other workflows.
 #
-# One-time setup (see the README of prusa3d/prusa-connect-marketplace-publish):
-#   - Settings > Actions > General: allow GitHub Actions to create and approve
-#     pull requests, so release-please can open its pull request.
-#   - An RSA signing key registered in the marketplace author console, its
-#     private half as PRUSA_CONNECT_EXTENSION_SIGNING_KEY in the environment
-#     `release`.
-#   - A trusted publisher in the author console naming this repository, this
-#     workflow file (release.yml) and the environment `release`.
+# The marketplace trusts uploads from this file in the `release` environment.
+# Renaming either breaks publishing. Setup: README.md, "Publishing setup".
+
 on:
   push:
     branches: [main]
+
 permissions: {}
-# One release at a time; a later push waits rather than cancelling a publish.
+
 concurrency:
   group: release
   cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
     permissions:
-      contents: write      # the release commit's tag and the GitHub release
-      pull-requests: write # the release pull request
-      issues: write        # its labels
+      contents: write
+      pull-requests: write
+      issues: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
       body: ${{ steps.release.outputs.body }}
     steps:
       - id: release
@@ -50,15 +42,13 @@ jobs:
     uses: prusa3d/prusa-connect-marketplace-publish/.github/workflows/publish.yml@v1
     with:
       path: .
-      core-ref: v0.1.0-beta.1 # the .core submodule's release; scripts/check-core-pin.sh holds them together
-      # The run is for a push, not a release, so the builder cannot read the
-      # notes off the release: hand it the ones release-please wrote.
+      core-ref: v0.1.0-beta.1 # must match the .core submodule
+      # This run isn't triggered by a release event, so pass the notes.
       changelog: ${{ needs.release-please.outputs.body }}
-    # Pass the key by name: `secrets: inherit` does not reach the builder,
-    # which lives in another organisation (prusa3d).
+    # Must be passed by name; `secrets: inherit` doesn't cross organisations.
     secrets:
       PRUSA_CONNECT_EXTENSION_SIGNING_KEY: ${{ secrets.PRUSA_CONNECT_EXTENSION_SIGNING_KEY }}
     permissions:
       contents: read
-      id-token: write     # lets the run prove which repository, workflow and builder it is
-      attestations: write # the build provenance of the archive and every binary
+      id-token: write
+      attestations: write

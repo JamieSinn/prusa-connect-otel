@@ -29,11 +29,9 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/wirerpc"
 )
 
-// The harness runs the module the way the host does: over a wirerpc session,
-// with the SDK's own host-side handlers for bus.subscribe and device.* on the
-// other end, and a collector that decodes what the module exports over
-// OTLP/HTTP. A test drives the host side and reads the collector.
-
+// harness runs the module over a real wirerpc session against the SDK's
+// host-side bus and device handlers, exporting to an in-process OTLP/HTTP
+// collector.
 type harness struct {
 	t         *testing.T
 	module    *module
@@ -92,16 +90,14 @@ func newHarness(t *testing.T, devices ...deviceapi.Device) *harness {
 	return h
 }
 
-// pipeEnd is one side of a session over two OS pipes, which is how the host
-// connects to a child's stdin and stdout. The kernel buffers them; net.Pipe
-// does not, and two read loops each answering a frame on an unbuffered pipe
-// block on each other's writes.
+// pipeEnd is one side of a session over OS pipes, like the host's connection
+// to a child's stdin/stdout. net.Pipe is unbuffered and would deadlock.
 type pipeEnd struct {
 	r, w *os.File
 }
 
-func (p pipeEnd) Read(b []byte) (int, error)  { return p.r.Read(b) }  //nolint:wrapcheck // a test transport
-func (p pipeEnd) Write(b []byte) (int, error) { return p.w.Write(b) } //nolint:wrapcheck // a test transport
+func (p pipeEnd) Read(b []byte) (int, error)  { return p.r.Read(b) }
+func (p pipeEnd) Write(b []byte) (int, error) { return p.w.Write(b) }
 func (p pipeEnd) Close() error                { return errors.Join(p.r.Close(), p.w.Close()) }
 
 func stdioPair(t *testing.T) (host, child pipeEnd) {
@@ -120,8 +116,8 @@ func stdioPair(t *testing.T) (host, child pipeEnd) {
 	return pipeEnd{r: toHost, w: fromHost}, pipeEnd{r: toChild, w: fromChild}
 }
 
-// configure sends plugin.configure as the host does, with the collector as the
-// endpoint and a short export interval unless the test overrides them.
+// configure sends plugin.configure with the test collector as the endpoint
+// and a short export interval, plus any overrides.
 func (h *harness) configure(overrides map[string]any) error {
 	config := map[string]any{
 		"otlp_endpoint":   h.collector.server.URL,
@@ -136,7 +132,7 @@ func (h *harness) configure(overrides map[string]any) error {
 
 	_, err = h.host.Call(context.Background(), wirerpc.MethodConfigure, wirerpc.Settings{Config: raw})
 
-	return err //nolint:wrapcheck // the test reads the wire error as sent
+	return err
 }
 
 func (h *harness) mustConfigure(overrides map[string]any) {
@@ -147,7 +143,6 @@ func (h *harness) mustConfigure(overrides map[string]any) {
 	}
 }
 
-// shutdown sends plugin.shutdown as the host does before it stops the child.
 func (h *harness) shutdown() {
 	h.t.Helper()
 
@@ -156,8 +151,7 @@ func (h *harness) shutdown() {
 	}
 }
 
-// subscribed waits for the module to open a subscription and returns what it
-// asked for.
+// subscribed waits for the module to subscribe and returns the parameters.
 func (h *harness) subscribed() busapi.SubscribeParams {
 	h.t.Helper()
 
@@ -171,7 +165,6 @@ func (h *harness) subscribed() busapi.SubscribeParams {
 	return busapi.SubscribeParams{}
 }
 
-// send writes one window on the open subscription.
 func (h *harness) send(w busapi.Window) {
 	h.t.Helper()
 
@@ -182,13 +175,13 @@ func (h *harness) send(w busapi.Window) {
 	}
 }
 
-// feed is the host's event stream: each subscription reports what it asked
-// for, then writes the windows the test sends until the test ends it.
+// feed is a fake event stream. Each subscription reports its parameters on
+// opened, then delivers windows from the test until ended.
 type feed struct {
 	windows chan busapi.Window
 	opened  chan busapi.SubscribeParams
-	end     chan struct{} // closing it ends the open subscription
-	refusal error         // the answer to the next subscription, once
+	end     chan struct{} // closed to end the current subscription
+	refusal error         // returned by the next subscription
 	mu      sync.Mutex
 }
 
@@ -220,7 +213,6 @@ func (f *feed) Subscribe(ctx context.Context, params busapi.SubscribeParams, wri
 	}
 }
 
-// endSubscription ends the open subscription from the host's side.
 func (f *feed) endSubscription() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -228,7 +220,6 @@ func (f *feed) endSubscription() {
 	close(f.end)
 }
 
-// refuseNext makes the host refuse the next subscription with err.
 func (f *feed) refuseNext(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -236,7 +227,7 @@ func (f *feed) refuseNext(err error) {
 	f.refusal = err
 }
 
-// fleet is the host's device.* surface over a fixed list.
+// fleet is a fake device API over a fixed list.
 type fleet struct {
 	mu      sync.Mutex
 	devices []deviceapi.Device
@@ -298,14 +289,14 @@ func (*fleet) JobHistory(context.Context, deviceapi.JobHistoryParams) (deviceapi
 	return deviceapi.JobPage{}, errNotServed
 }
 
-// collector is an OTLP/HTTP receiver that keeps every request it decodes.
+// collector is an OTLP/HTTP receiver that keeps every request.
 type collector struct {
 	server *httptest.Server
 
 	mu      sync.Mutex
 	metrics []*colmetricspb.ExportMetricsServiceRequest
 	traces  []*coltracepb.ExportTraceServiceRequest
-	refuse  int // answer this many more requests with 401, which the exporter does not retry
+	refuse  int // reject this many requests with 401 (not retried by the exporter)
 }
 
 func newCollector(t *testing.T) *collector {
@@ -364,7 +355,7 @@ func (c *collector) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-protobuf")
 }
 
-// lastMetric returns the named metric from the newest export that carries it.
+// lastMetric returns the named metric from the newest export containing it.
 func (c *collector) lastMetric(name string) *metricspb.Metric {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -384,7 +375,6 @@ func (c *collector) lastMetric(name string) *metricspb.Metric {
 	return nil
 }
 
-// spans returns every span received, in order.
 func (c *collector) spans() []*tracepb.Span {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -402,7 +392,6 @@ func (c *collector) spans() []*tracepb.Span {
 	return spans
 }
 
-// eventually polls cond until it holds or five seconds pass.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 
@@ -416,7 +405,7 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// gaugePoint finds the data point of a gauge whose attributes include want.
+// gaugePoint returns the first data point whose attributes include want.
 func gaugePoint(m *metricspb.Metric, want map[string]string) (*metricspb.NumberDataPoint, bool) {
 	for _, dp := range m.GetGauge().GetDataPoints() {
 		if hasAttrs(dp.GetAttributes(), want) {
@@ -456,8 +445,7 @@ func attrMap(attrs []*commonpb.KeyValue) map[string]string {
 	return got
 }
 
-// envelope renders one event about the bench printer as the host writes it on
-// the stream.
+// envelope builds a stream event for the bench printer.
 func envelope(t *testing.T, eventType string, class event.Class, data any) json.RawMessage {
 	t.Helper()
 
@@ -485,7 +473,6 @@ func envelope(t *testing.T, eventType string, class event.Class, data any) json.
 	return raw
 }
 
-// sample renders one telemetry sample from the bench printer.
 func sample(t *testing.T, path string, value any) json.RawMessage {
 	t.Helper()
 

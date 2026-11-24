@@ -1,15 +1,13 @@
 name: CI
-# Every push and pull request runs the gate, checks that the .core submodule is
-# the Prusa Connect release the builder will use, and dry-runs the
-# marketplace's builder: the same build and checks as a release, signed with a
-# throwaway key and uploaded nowhere. A release the marketplace would refuse
-# fails here and not at publishing.
+
 on:
   push:
     branches: ['**']
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -18,23 +16,20 @@ jobs:
         with:
           persist-credentials: false
           submodules: true
-      # The builder clones core-ref into .core/ itself. A submodule at another
-      # commit would mark the published binaries as built from a modified tree,
-      # and build them against another core than the one tested here.
-      - name: The submodule is the core both workflows name
-        run: scripts/check-core-pin.sh
+      - run: scripts/check-core-pin.sh
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - run: make check
 
+  # Same build and checks as a release, signed with a throwaway key and not
+  # uploaded.
   build:
     uses: prusa3d/prusa-connect-marketplace-publish/.github/workflows/publish.yml@v1
     with:
       path: .
-      core-ref: v0.1.0-beta.1 # the .core submodule's release; scripts/check-core-pin.sh holds them together
+      core-ref: v0.1.0-beta.1 # must match the .core submodule
       dry-run: true
-    # A dry run uses neither, but the builder's publish job declares them.
     permissions:
       contents: read
       id-token: write

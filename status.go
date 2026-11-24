@@ -6,13 +6,9 @@ import (
 	"time"
 )
 
-// status is what GET /status reports: whether the stream is being read and
-// whether exports reach the collector. A failure is reported while it is the
-// latest outcome, and cleared by the next success, so the route never shows a
-// warning that has stopped being true.
-//
-// It is written from the follow goroutine and the SDK's export goroutines, and
-// read by the route; mu guards every field.
+// status tracks stream and export health for GET /status. A failure is
+// reported until the next success clears it. It is written by the follow
+// goroutine and the SDK's export goroutines; mu guards all fields.
 type status struct {
 	log *slog.Logger
 
@@ -25,18 +21,17 @@ type status struct {
 	exports    map[string]*outcome
 }
 
-// outcome is the latest result of something that is retried.
+// outcome is the latest result of a retried operation.
 type outcome struct {
-	lastSuccess time.Time
-	failingFor  time.Time // zero while the latest attempt succeeded
-	err         string
+	lastSuccess  time.Time
+	failingSince time.Time // zero while healthy
+	err          string
 }
 
 func newStatus(log *slog.Logger) *status {
 	return &status{log: log, exports: map[string]*outcome{}}
 }
 
-// configuredFor records the collector the pipeline exports to.
 func (s *status) configuredFor(endpoint, protocol string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -44,24 +39,23 @@ func (s *status) configuredFor(endpoint, protocol string) {
 	s.configured, s.endpoint, s.protocol = true, endpoint, protocol
 }
 
-// window records a window read off the stream.
 func (s *status) window(at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.lastWindow = at
-	s.settle("the event stream", &s.stream, nil, at)
+	s.settle("event stream", &s.stream, nil, at)
 }
 
-// streamFailed records the stream or the fleet refusing the module.
 func (s *status) streamFailed(err error, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.settle("the event stream", &s.stream, err, at)
+	s.settle("event stream", &s.stream, err, at)
 }
 
-// exported records one export. It runs on the SDK's export goroutines.
+// exported records the result of one export. It is called from the SDK's
+// export goroutines.
 func (s *status) exported(signal string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,32 +66,30 @@ func (s *status) exported(signal string, err error) {
 		s.exports[signal] = o
 	}
 
-	s.settle("the "+signal+" export", o, err, time.Now())
+	s.settle(signal+" export", o, err, time.Now())
 }
 
-// settle applies one result and logs only a change between failing and
-// succeeding, so a collector that is down for an hour writes two lines and not
-// one per export.
+// settle records a result. It logs only on a change between healthy and
+// failing, so a long outage produces two log lines rather than one per try.
 func (s *status) settle(what string, o *outcome, err error, at time.Time) {
 	if err == nil {
-		if !o.failingFor.IsZero() {
-			s.log.Info(what+" recovered", "failed_since", o.failingFor)
+		if !o.failingSince.IsZero() {
+			s.log.Info(what+" recovered", "failing_since", o.failingSince)
 		}
 
-		o.lastSuccess, o.failingFor, o.err = at, time.Time{}, ""
+		o.lastSuccess, o.failingSince, o.err = at, time.Time{}, ""
 
 		return
 	}
 
-	if o.failingFor.IsZero() {
-		o.failingFor = at
-		s.log.Warn(what+" is failing", "error", err)
+	if o.failingSince.IsZero() {
+		o.failingSince = at
+		s.log.Warn(what+" failing", "error", err)
 	}
 
 	o.err = err.Error()
 }
 
-// statusReport is the body of GET /status.
 type statusReport struct {
 	Configured bool                     `json:"configured"`
 	Endpoint   string                   `json:"endpoint,omitempty"`
@@ -112,10 +104,10 @@ type statusReport struct {
 }
 
 type outcomeReport struct {
-	OK          bool       `json:"ok"`
-	LastSuccess *time.Time `json:"last_success,omitempty"`
-	FailingFor  *time.Time `json:"failing_since,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	OK           bool       `json:"ok"`
+	LastSuccess  *time.Time `json:"last_success,omitempty"`
+	FailingSince *time.Time `json:"failing_since,omitempty"`
+	Error        string     `json:"error,omitempty"`
 }
 
 func (s *status) report() statusReport {
@@ -140,10 +132,10 @@ func (s *status) report() statusReport {
 
 func (o outcome) report() outcomeReport {
 	return outcomeReport{
-		OK:          !o.lastSuccess.IsZero() && o.failingFor.IsZero(),
-		LastSuccess: timeOrNil(o.lastSuccess),
-		FailingFor:  timeOrNil(o.failingFor),
-		Error:       o.err,
+		OK:           !o.lastSuccess.IsZero() && o.failingSince.IsZero(),
+		LastSuccess:  timeOrNil(o.lastSuccess),
+		FailingSince: timeOrNil(o.failingSince),
+		Error:        o.err,
 	}
 }
 

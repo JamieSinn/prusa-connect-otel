@@ -14,54 +14,48 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// maxNameLen is the longest instrument name OpenTelemetry accepts.
-const maxNameLen = 255
+const (
+	// maxNameLen is OpenTelemetry's limit on instrument names.
+	maxNameLen = 255
+	// maxInstruments caps the number of metric names. Drivers define their
+	// own state paths, so without a cap memory could grow without bound.
+	maxInstruments = 256
+)
 
-// maxInstruments bounds how many distinct metric names the module creates. A
-// driver declares its own state paths, so the set is open; past the bound a new
-// path is counted and dropped rather than growing memory without limit.
-const maxInstruments = 256
-
-// statePaths are the paths whose text value is a state machine word, such as
-// IDLE or PRINTING. They become a gauge of 1 with the word as an attribute.
-// Every other text value is dropped: a file name or a material as an attribute
-// would mint a series per value.
+// statePaths hold a state name such as IDLE or PRINTING. They are exported
+// as a gauge of 1 with the state as an attribute. Other string values are
+// dropped, since each distinct value would create a new series.
 var statePaths = map[string]bool{
 	"/state":     true,
 	"/job/state": true,
 }
 
-// indexSegment is a path segment that numbers a member rather than naming a
-// field: "0" in /tools/0/nozzle_temp, or "0.1" for slot 1 of the feeder on
-// tool 0.
-var indexSegment = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
+var (
+	// indexSegment matches path segments that are indexes, such as "0" in
+	// /tools/0/nozzle_temp or "0.1" for slot 1 of tool 0.
+	indexSegment = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
+	nameUnsafe   = regexp.MustCompile(`[^a-z0-9_]+`)
+)
 
-// nameSegment is what a segment is reduced to in a metric name.
-var nameUnsafe = regexp.MustCompile(`[^a-z0-9_]+`)
-
-// series is where one state path lands: the metric name, its unit, and the
-// attributes the path's index segments carry.
 type series struct {
 	name  string
 	unit  string
 	attrs []attribute.KeyValue
 }
 
-// seriesOf maps a state path onto a metric. Index segments leave the name and
-// become attributes named after the segment before them, so every tool's
-// nozzle shares one metric:
+// seriesOf maps a state path to a metric. Index segments become attributes,
+// so all tools share one metric:
 //
-//	/tools/0/nozzle_temp   ->  <prefix>.tools.nozzle_temp {prusa.tools.index="0"}
-//	/temperature/bed       ->  <prefix>.temperature.bed
+//	/tools/0/nozzle_temp  ->  <prefix>.tools.nozzle_temp {prusa.tools.index="0"}
+//	/temperature/bed      ->  <prefix>.temperature.bed
 //
-// It reports false for a path with no name segment.
+// It returns false for paths that have no name or end in an id.
 func seriesOf(prefix, path string) (series, bool) {
 	var (
-		names []string
-		attrs []attribute.KeyValue
+		names  []string
+		attrs  []attribute.KeyValue
+		parent string
 	)
-
-	parent := ""
 
 	for segment := range strings.SplitSeq(path, "/") {
 		if segment == "" {
@@ -100,16 +94,13 @@ func seriesOf(prefix, path string) (series, bool) {
 	return series{name: name, unit: unitOf(names), attrs: attrs}, true
 }
 
-// isIdentifier reports a field that names something rather than measures it,
-// such as /job/id or /dialog/id. A number there is a label, and as a gauge it
-// would chart one meaningless line per print.
+// isIdentifier reports fields like /job/id whose numeric value is a label,
+// not a measurement.
 func isIdentifier(field string) bool {
 	return field == "id" || strings.HasSuffix(field, "_id")
 }
 
-// unitOf guesses a UCUM unit from the name segments: a temperature anywhere in
-// the path, otherwise the last segment's suffix. A wrong guess only mislabels a
-// chart, and no guess is the empty unit.
+// unitOf guesses a UCUM unit from the path. An unknown unit is left empty.
 func unitOf(names []string) string {
 	field := names[len(names)-1]
 
@@ -130,9 +121,8 @@ func unitOf(names []string) string {
 	return ""
 }
 
-// isTemperature reports a name segment with temp or temperature as one of its
-// words, as in nozzle_temp or temp_bed, and not inside another word, as in
-// retry_attempts.
+// isTemperature matches segments that contain the word temp or temperature,
+// such as nozzle_temp, but not retry_attempts.
 func isTemperature(segment string) bool {
 	for word := range strings.SplitSeq(segment, "_") {
 		if word == "temp" || word == "temperature" {
@@ -143,50 +133,39 @@ func isTemperature(segment string) bool {
 	return false
 }
 
-// device is what the module knows about one printer.
 type device struct {
 	name, vendor, model string
 	connected           bool
 }
 
-// pointKey names one value: a printer and the state path it reported.
 type pointKey struct {
 	device, path string
 }
 
-// point is the latest value of one state path on one printer.
 type point struct {
 	value float64
-	attrs []attribute.KeyValue // the path's index attributes, and the state word
+	attrs []attribute.KeyValue
 }
 
-// gauges holds the latest value of every state path on every printer, and
-// observes them as OTel gauges when the metric reader collects.
+// gauges holds the latest value of every state path on every device and
+// reports them through observable gauges.
 //
-// # Locking
-//
-// Two locks, always taken in this order and never the other:
-//
-//   - instMu guards the instrument set. It is held while an instrument is
-//     created, and the SDK takes its own pipeline lock inside that call.
-//   - mu guards devices and points. An instrument's callback takes it, and the
-//     SDK calls the callback while holding that same pipeline lock.
-//
-// So mu is never held while an instrument is created; otherwise a collection
-// running at the same time would deadlock against it. Writes come from the one
-// goroutine that follows the event stream. Reads come from the reader.
+// Lock order: instMu, then the SDK's internal lock, then mu. Instruments are
+// created under instMu, and the SDK holds its lock while calling the gauge
+// callbacks, which take mu. So mu must never be held while creating an
+// instrument, or a concurrent collection deadlocks.
 type gauges struct {
 	meter  metric.Meter
 	prefix string
 
 	instMu      sync.Mutex
-	instruments map[string]bool // metric name -> registered
+	instruments map[string]bool // metric name -> created successfully
 
 	mu      sync.Mutex
 	devices map[string]*device
-	points  map[string]map[pointKey]point // metric name -> its series
+	points  map[string]map[pointKey]point // metric name -> series
 
-	dropped atomic.Int64 // values dropped because the instrument bound was reached
+	dropped atomic.Int64 // values dropped because maxInstruments was reached
 }
 
 func newGauges(meter metric.Meter, prefix string) (*gauges, error) {
@@ -198,19 +177,19 @@ func newGauges(meter metric.Meter, prefix string) (*gauges, error) {
 		points:      map[string]map[pointKey]point{},
 	}
 
-	if _, err := meter.Int64ObservableGauge(prefix+".device.connected",
-		metric.WithDescription("1 while Prusa Connect holds a connection to the printer, else 0."),
+	_, err := meter.Int64ObservableGauge(prefix+".device.connected",
+		metric.WithDescription("1 while Prusa Connect is connected to the printer, otherwise 0."),
 		metric.WithInt64Callback(g.observeConnected),
-	); err != nil {
-		return nil, err //nolint:wrapcheck // the SDK names the instrument
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	return g, nil
 }
 
-// sample stores one reported value of a state path. A value that is not a
-// number, a boolean, a state word or null is ignored; null forgets the value,
-// because a path a driver no longer reports is unknown, not zero.
+// sample stores a value for a state path. Values that aren't numbers,
+// booleans or state names are ignored. null removes the value.
 func (g *gauges) sample(deviceID, path string, raw json.RawMessage) {
 	s, ok := seriesOf(g.prefix, path)
 	if !ok {
@@ -219,8 +198,8 @@ func (g *gauges) sample(deviceID, path string, raw json.RawMessage) {
 
 	key := pointKey{device: deviceID, path: path}
 
-	value, attrs, keep := decode(path, raw)
-	if !keep {
+	value, attrs, ok := decode(path, raw)
+	if !ok {
 		g.forget(s.name, key)
 
 		return
@@ -244,7 +223,7 @@ func (g *gauges) sample(deviceID, path string, raw json.RawMessage) {
 	g.points[s.name][key] = point{value: value, attrs: append(s.attrs, attrs...)}
 }
 
-// decode reads one value. It reports false for a value that has no gauge.
+// decode parses a state value. It returns false if the value can't be a gauge.
 func decode(path string, raw json.RawMessage) (float64, []attribute.KeyValue, bool) {
 	raw = bytes.TrimSpace(raw)
 
@@ -256,31 +235,31 @@ func decode(path string, raw json.RawMessage) (float64, []attribute.KeyValue, bo
 	case bytes.Equal(raw, []byte("false")):
 		return 0, nil, true
 	case raw[0] == '"':
-		var word string
-		if !statePaths[path] || json.Unmarshal(raw, &word) != nil || word == "" {
+		var state string
+		if !statePaths[path] || json.Unmarshal(raw, &state) != nil || state == "" {
 			return 0, nil, false
 		}
 
-		return 1, []attribute.KeyValue{attribute.String("prusa.state", word)}, true
+		return 1, []attribute.KeyValue{attribute.String("prusa.state", state)}, true
 	}
 
 	var number float64
 	if json.Unmarshal(raw, &number) != nil {
-		return 0, nil, false // an object or an array
+		return 0, nil, false
 	}
 
 	return number, nil, true
 }
 
-// ensure creates the gauge for s once. It reports false when the bound on
-// instruments is reached. It must not be called with mu held; see the type's
-// doc.
+// ensure creates the gauge for s if it doesn't exist yet. It returns false if
+// the instrument cap is reached or the SDK rejected the name. Don't call it
+// with mu held.
 func (g *gauges) ensure(s series) bool {
 	g.instMu.Lock()
 	defer g.instMu.Unlock()
 
-	if registered, seen := g.instruments[s.name]; seen {
-		return registered
+	if created, seen := g.instruments[s.name]; seen {
+		return created
 	}
 
 	if len(g.instruments) >= maxInstruments {
@@ -298,8 +277,7 @@ func (g *gauges) ensure(s series) bool {
 		}),
 	)
 
-	// A name the SDK refuses is recorded as refused, so it is not retried on
-	// every sample.
+	// Remember rejected names too, so they aren't retried on every sample.
 	g.instruments[name] = err == nil
 
 	return err == nil
@@ -320,18 +298,17 @@ func (g *gauges) observeConnected(_ context.Context, o metric.Int64Observer) err
 	defer g.mu.Unlock()
 
 	for id, d := range g.devices {
-		var up int64
+		var connected int64
 		if d.connected {
-			up = 1
+			connected = 1
 		}
 
-		o.Observe(up, metric.WithAttributes(d.attrs(id)...))
+		o.Observe(connected, metric.WithAttributes(d.attrs(id)...))
 	}
 
 	return nil
 }
 
-// forget drops one value.
 func (g *gauges) forget(name string, key pointKey) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -339,9 +316,8 @@ func (g *gauges) forget(name string, key pointKey) {
 	delete(g.points[name], key)
 }
 
-// describe records what a printer is called and whether it is connected. A
-// printer that is not connected has no current telemetry, so its values are
-// dropped and only the connected gauge reports it.
+// describe sets a device's details. A disconnected device has no current
+// telemetry, so its values are dropped.
 func (g *gauges) describe(id string, d device) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -353,7 +329,6 @@ func (g *gauges) describe(id string, d device) {
 	}
 }
 
-// presence records a printer connecting or going away.
 func (g *gauges) presence(id string, connected bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -365,7 +340,6 @@ func (g *gauges) presence(id string, connected bool) {
 	}
 }
 
-// remove forgets a printer entirely, as for one an operator removed.
 func (g *gauges) remove(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -374,7 +348,7 @@ func (g *gauges) remove(id string) {
 	delete(g.devices, id)
 }
 
-// retain forgets every printer not in keep, as after a fresh listing.
+// retain removes every device not in keep.
 func (g *gauges) retain(keep map[string]bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -387,8 +361,7 @@ func (g *gauges) retain(keep map[string]bool) {
 	}
 }
 
-// touch makes a printer known by its id alone, leaving what is known of it as
-// it is. A printer first seen on the stream is taken to be connected.
+// touch adds a device by id if it isn't known yet.
 func (g *gauges) touch(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -396,7 +369,6 @@ func (g *gauges) touch(id string) {
 	g.deviceLocked(id)
 }
 
-// known reports whether the printer has been described or sampled.
 func (g *gauges) known(id string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -406,7 +378,6 @@ func (g *gauges) known(id string) bool {
 	return ok
 }
 
-// attrsOf is the printer's attributes, for a span or a counter.
 func (g *gauges) attrsOf(id string) []attribute.KeyValue {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -414,7 +385,6 @@ func (g *gauges) attrsOf(id string) []attribute.KeyValue {
 	return g.devices[id].attrs(id)
 }
 
-// counts is what the status route reports.
 func (g *gauges) counts() (devices, values, instruments int) {
 	g.instMu.Lock()
 	instruments = len(g.instruments)
@@ -423,13 +393,15 @@ func (g *gauges) counts() (devices, values, instruments int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	for _, byKey := range g.points {
-		values += len(byKey)
+	for _, series := range g.points {
+		values += len(series)
 	}
 
 	return len(g.devices), values, instruments
 }
 
+// deviceLocked returns the device, adding it if needed. A device first seen
+// on the stream is assumed to be connected.
 func (g *gauges) deviceLocked(id string) *device {
 	d, ok := g.devices[id]
 	if !ok {
@@ -441,32 +413,34 @@ func (g *gauges) deviceLocked(id string) *device {
 }
 
 func (g *gauges) dropValuesLocked(id string) {
-	for _, byKey := range g.points {
-		for key := range byKey {
+	for _, series := range g.points {
+		for key := range series {
 			if key.device == id {
-				delete(byKey, key)
+				delete(series, key)
 			}
 		}
 	}
 }
 
-// attrs is the printer's identity as attributes. A nil device is one only its
-// id is known for.
+// attrs returns the device's identifying attributes. d may be nil if only the
+// id is known.
 func (d *device) attrs(id string) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{attribute.String("prusa.device.id", id)}
 	if d == nil {
 		return attrs
 	}
 
-	for _, kv := range []struct{ key, value string }{
-		{"prusa.device.name", d.name},
-		{"prusa.device.vendor", d.vendor},
-		{"prusa.device.model", d.model},
-	} {
-		if kv.value != "" {
-			attrs = append(attrs, attribute.String(kv.key, kv.value))
-		}
-	}
+	attrs = appendNonEmpty(attrs, "prusa.device.name", d.name)
+	attrs = appendNonEmpty(attrs, "prusa.device.vendor", d.vendor)
+	attrs = appendNonEmpty(attrs, "prusa.device.model", d.model)
 
 	return attrs
+}
+
+func appendNonEmpty(attrs []attribute.KeyValue, key, value string) []attribute.KeyValue {
+	if value == "" {
+		return attrs
+	}
+
+	return append(attrs, attribute.String(key, value))
 }

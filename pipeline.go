@@ -15,10 +15,9 @@ import (
 	"github.com/prusa3d/prusa-connect/sdk/event"
 	"github.com/prusa3d/prusa-connect/sdk/wirerpc"
 
-	"github.com/jamiesinn/prusa-connect-otel/internal/otlpexport"
+	"prusa-connect-otel.jamiesinn.ca/internal/otlpexport"
 )
 
-// followed is every event type the module reads.
 var followed = []string{
 	event.TypeDeviceTelemetrySampled,
 	event.TypeDevicePresenceChanged,
@@ -26,16 +25,15 @@ var followed = []string{
 	event.TypeDeviceJobSettled,
 }
 
-// The wait between two attempts to follow the stream, doubling from the first
-// to the last.
+// Backoff between subscription attempts.
 const (
-	firstRetry  = time.Second
-	lastRetry   = 30 * time.Second
-	retryGrowth = 2
+	firstRetry = time.Second
+	maxRetry   = 30 * time.Second
 )
 
-// host is the part of the session the pipeline calls: a stream for the
-// subscription, and calls for the fleet. *wirerpc.Conn is one.
+var errSubscriptionEnded = errors.New("the host ended the subscription")
+
+// host is the part of the host connection the pipeline uses.
 type host interface {
 	busapi.Opener
 	deviceapi.Caller
@@ -43,9 +41,9 @@ type host interface {
 
 var _ host = (*wirerpc.Conn)(nil)
 
-// pipeline follows the host's event stream and exports what it reads. One
-// goroutine runs follow; the gauges and the status have their own locks for
-// the readers on other goroutines.
+// pipeline follows the host's event stream on one goroutine and feeds the
+// gauges and jobs. gauges and status are also read from other goroutines and
+// do their own locking.
 type pipeline struct {
 	log       *slog.Logger
 	providers *otlpexport.Providers
@@ -73,7 +71,6 @@ func newPipeline(log *slog.Logger, providers *otlpexport.Providers, prefix strin
 	return &pipeline{log: log, providers: providers, gauges: g, jobs: j, status: st, done: make(chan struct{})}, nil
 }
 
-// start runs follow until stop.
 func (p *pipeline) start(ctx context.Context, conn host) {
 	ctx, p.cancel = context.WithCancel(ctx)
 
@@ -83,8 +80,7 @@ func (p *pipeline) start(ctx context.Context, conn host) {
 	}()
 }
 
-// stop ends follow, then flushes what is buffered to the collector. ctx bounds
-// the flush.
+// stop ends the follow loop and flushes the exporters within ctx.
 func (p *pipeline) stop(ctx context.Context) error {
 	p.cancel()
 	<-p.done
@@ -92,39 +88,29 @@ func (p *pipeline) stop(ctx context.Context) error {
 	return p.providers.Shutdown(ctx)
 }
 
-// errSubscriptionEnded is a subscription the host ended without an error.
-var errSubscriptionEnded = errors.New("the host ended the subscription")
-
-// follower is the state of one follow loop: where the stream is resumed from
-// and how long to wait before the next attempt. Only follow's goroutine
-// touches it.
+// follower is the follow loop's state. Only the follow goroutine uses it.
 type follower struct {
-	conn   host
 	fleet  *deviceapi.Client
 	cursor string
 	wait   time.Duration
 	seeded bool
 }
 
-// follow reads the fleet once, then the stream, and reads the fleet again
-// whenever the stream says continuity is gone. A refused or ended subscription
-// is opened again after a wait that doubles up to lastRetry, from the cursor of
-// the last window read, so no settled print is missed or counted twice while
-// the process lives.
+// follow loads the fleet, then reads the event stream until ctx is done,
+// resubscribing with backoff from the last cursor whenever the stream ends.
 func (p *pipeline) follow(ctx context.Context, conn host) {
-	f := &follower{conn: conn, fleet: deviceapi.NewClient(conn), wait: firstRetry}
+	f := &follower{fleet: deviceapi.NewClient(conn), wait: firstRetry}
 
 	for ctx.Err() == nil {
-		err := p.attempt(ctx, f)
+		err := p.subscribe(ctx, conn, f)
 		if ctx.Err() != nil {
 			return
 		}
 
 		if errors.Is(err, busapi.ErrInvalidSubscription) {
-			// The likeliest field to be out of bounds is the cursor, so the
-			// next attempt starts at the head. A subscription from the head
-			// carries no resync, so nothing would report what changed since
-			// the last window: the fleet is read again first.
+			// Most likely the cursor is no longer valid. Start from the head,
+			// and reload the fleet first: a fresh subscription has no resync
+			// flag, so changes made in between would otherwise be missed.
 			f.cursor = ""
 			f.seeded = false
 		}
@@ -137,16 +123,16 @@ func (p *pipeline) follow(ctx context.Context, conn host) {
 		case <-time.After(f.wait):
 		}
 
-		f.wait = min(retryGrowth*f.wait, lastRetry)
+		f.wait = min(2*f.wait, maxRetry)
 	}
 }
 
-// attempt seeds the gauges if they are not yet, then reads the stream until it
-// ends. It always returns why it ended.
-func (p *pipeline) attempt(ctx context.Context, f *follower) error {
+// subscribe loads the fleet if needed, then reads the stream until it ends.
+// It always returns a non-nil error.
+func (p *pipeline) subscribe(ctx context.Context, conn host, f *follower) error {
 	if !f.seeded {
-		// The stream says when a value changes, so a value that settled before
-		// the module started is read off the fleet.
+		// The stream only reports changes, so current values come from the
+		// fleet.
 		if err := p.seed(ctx, f.fleet); err != nil {
 			return err
 		}
@@ -156,20 +142,18 @@ func (p *pipeline) attempt(ctx context.Context, f *follower) error {
 
 	params := busapi.SubscribeParams{Types: followed, Resume: f.cursor}
 
-	err := busapi.Subscribe(ctx, f.conn, params, func(w busapi.Window) error {
+	err := busapi.Subscribe(ctx, conn, params, func(w busapi.Window) error {
 		return p.window(ctx, f, w)
 	})
 	if err != nil {
-		return fmt.Errorf("follow the event stream: %w", err)
+		return fmt.Errorf("event stream: %w", err)
 	}
 
 	return errSubscriptionEnded
 }
 
-// window applies one window and moves the cursor past it.
 func (p *pipeline) window(ctx context.Context, f *follower, w busapi.Window) error {
 	f.wait = firstRetry
-
 	p.status.window(time.Now())
 
 	if w.Resync {
@@ -187,15 +171,15 @@ func (p *pipeline) window(ctx context.Context, f *follower, w busapi.Window) err
 	return nil
 }
 
-// seed reads every printer the module may see, with its state tree, and
-// forgets any it held that the fleet no longer lists.
+// seed loads every device and its state, and drops devices that are no longer
+// listed.
 func (p *pipeline) seed(ctx context.Context, fleet *deviceapi.Client) error {
 	listed := map[string]bool{}
 
 	for offset := 0; ; {
 		page, err := fleet.List(ctx, deviceapi.ListParams{Limit: deviceapi.MaxPageLimit, Offset: offset})
 		if err != nil {
-			return fmt.Errorf("list the fleet: %w", err)
+			return fmt.Errorf("list devices: %w", err)
 		}
 
 		for _, d := range page.Items {
@@ -214,7 +198,6 @@ func (p *pipeline) seed(ctx context.Context, fleet *deviceapi.Client) error {
 	return nil
 }
 
-// take records one printer as the fleet answered it.
 func (p *pipeline) take(d deviceapi.Device) {
 	if d.Retired {
 		p.gauges.remove(d.ID)
@@ -233,9 +216,8 @@ func (p *pipeline) take(d deviceapi.Device) {
 	}
 }
 
-// apply reads one window. Telemetry goes first and events after it, so a
-// printer that went away in this window ends without values rather than with
-// the ones it sent before it left.
+// apply handles one window. Telemetry is applied before events so that a
+// disconnect in the same window clears the values that preceded it.
 func (p *pipeline) apply(ctx context.Context, fleet *deviceapi.Client, w busapi.Window) {
 	for _, raw := range w.Telemetry {
 		var e event.Envelope
@@ -258,7 +240,7 @@ func (p *pipeline) apply(ctx context.Context, fleet *deviceapi.Client, w busapi.
 		}
 
 		if !p.gauges.known(id) {
-			p.introduce(ctx, fleet, id)
+			p.lookup(ctx, fleet, id)
 		}
 
 		p.gauges.sample(id, s.Path, s.Value)
@@ -274,7 +256,6 @@ func (p *pipeline) apply(ctx context.Context, fleet *deviceapi.Client, w busapi.
 	}
 }
 
-// event applies one durable event.
 func (p *pipeline) event(ctx context.Context, fleet *deviceapi.Client, e event.Envelope) {
 	id, ok := deviceOf(e)
 	if !ok {
@@ -293,39 +274,38 @@ func (p *pipeline) event(ctx context.Context, fleet *deviceapi.Client, e event.E
 
 		p.gauges.presence(id, change.Connected)
 
-		// The stream reports what changes after the printer is back, so a
-		// value that is the same as before it left is read off the fleet.
+		// Values that didn't change while the device was away won't appear on
+		// the stream, so reload them.
 		if change.Connected {
-			p.introduce(ctx, fleet, id)
+			p.lookup(ctx, fleet, id)
 		}
 
 	case event.TypeDeviceRecordChanged:
-		// The frame's own fields are not in the SDK's contract, so the record
-		// is read again through the one that is.
-		p.introduce(ctx, fleet, id)
+		// The event payload isn't part of the SDK contract, so reload the
+		// device instead of reading it.
+		p.lookup(ctx, fleet, id)
 
 	case event.TypeDeviceJobSettled:
 		var settled event.JobSettled
 		if err := json.Unmarshal(e.Data, &settled); err != nil {
-			p.log.WarnContext(ctx, "a settled print could not be read", "device", id, "error", err)
+			p.log.WarnContext(ctx, "unreadable job.settled event", "device", id, "error", err)
 
 			return
 		}
 
 		if !p.gauges.known(id) {
-			p.introduce(ctx, fleet, id)
+			p.lookup(ctx, fleet, id)
 		}
 
 		p.jobs.record(ctx, p.gauges.attrsOf(id), settled)
 	}
 }
 
-// introduce reads one printer's record. A printer the fleet will not answer for
-// is still reported, by its id alone.
-func (p *pipeline) introduce(ctx context.Context, fleet *deviceapi.Client, id string) {
+// lookup loads one device. If that fails, the device is still tracked by id.
+func (p *pipeline) lookup(ctx context.Context, fleet *deviceapi.Client, id string) {
 	d, err := fleet.Get(ctx, deviceapi.GetParams{ID: id})
 	if err != nil {
-		p.log.WarnContext(ctx, "a printer's record could not be read", "device", id, "error", err)
+		p.log.WarnContext(ctx, "device lookup failed", "device", id, "error", err)
 		p.gauges.touch(id)
 
 		return
@@ -334,7 +314,6 @@ func (p *pipeline) introduce(ctx context.Context, fleet *deviceapi.Client, id st
 	p.take(d)
 }
 
-// deviceOf reads the printer an envelope is about from its subject.
 func deviceOf(e event.Envelope) (string, bool) {
 	origin, err := event.ParseOrigin(e.Subject)
 	if err != nil || origin.Kind() != event.KindDevice {

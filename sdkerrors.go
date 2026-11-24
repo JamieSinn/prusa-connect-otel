@@ -6,14 +6,13 @@ import (
 	"time"
 )
 
-// repeatWindow is how long an SDK error is kept quiet after it was logged once.
+// repeatWindow is how long a repeated SDK error is suppressed.
 const repeatWindow = 5 * time.Minute
 
-// sdkErrors is the OpenTelemetry SDK's error handler. The SDK reports every
-// failed export there, so a collector that is down for an hour would write one
-// line per export into the host's log. It logs each distinct message once per
-// repeatWindow. Whether exports currently fail is on GET /status, which clears
-// when they recover.
+// sdkErrors is the OpenTelemetry error handler. The SDK reports every failed
+// export, so a down collector would log on every interval; this logs each
+// distinct message at most once per repeatWindow. Current export health is on
+// GET /status.
 type sdkErrors struct {
 	log *slog.Logger
 	now func() time.Time
@@ -37,20 +36,20 @@ func (h *sdkErrors) Handle(err error) {
 
 	h.mu.Lock()
 
-	for seen, at := range h.logged {
+	for m, at := range h.logged {
 		if now.Sub(at) >= repeatWindow {
-			delete(h.logged, seen)
+			delete(h.logged, m)
 		}
 	}
 
-	_, quiet := h.logged[msg]
-	if !quiet {
+	_, suppressed := h.logged[msg]
+	if !suppressed {
 		h.logged[msg] = now
 	}
 
 	h.mu.Unlock()
 
-	if !quiet {
-		h.log.Warn("opentelemetry sdk", "error", msg, "repeats_hidden_for", repeatWindow)
+	if !suppressed {
+		h.log.Warn("opentelemetry sdk", "error", msg)
 	}
 }
